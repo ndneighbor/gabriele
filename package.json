@@ -1,0 +1,17 @@
+{
+  "name": "durandal",
+  "version": "0.0.1",
+  "description": "Agent-first overlay terminal — supervise Claude Code agents from a HUD over your game.",
+  "main": "overlay/main.js",
+  "scripts": {
+    "bridge": "node bridge/server.js",
+    "overlay": "electron .",
+    "send": "node bridge/send.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^31.7.6"
+  }
+}

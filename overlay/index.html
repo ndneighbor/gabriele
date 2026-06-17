@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="edge"></div>
+  <div id="app">
+    <header id="bar">
+      <span class="brand">DURANDAL</span>
+      <span id="conn" class="conn off">offline</span>
+    </header>
+    <div id="tiles"></div>
+    <div id="inputbar" class="hidden">
+      <span class="chev">›</span>
+      <input id="prompt" type="text" placeholder="prompt an agent…" spellcheck="false" />
+    </div>
+    <footer id="hint">⌃⇧Space to prompt · Esc to dismiss</footer>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>
