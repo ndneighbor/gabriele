@@ -1,4 +1,4 @@
-# Durandal
+# Gabriele
 
 An **agent-first overlay terminal**. A translucent, always-on-top HUD that floats
 over your game and lets you supervise Claude Code agents in your peripheral
@@ -30,10 +30,10 @@ npm run send "say hi"   # terminal 3 — fire a test prompt (or use ⌃⇧Space)
 
 On the **Mac**: `npm run bridge`  (note the Mac's LAN IP, e.g. 172.20.6.188)
 
-On the **PC**: `set DURANDAL_URL=ws://172.20.6.188:4848 && npm run overlay`
+On the **PC**: `set GABRIELE_URL=ws://172.20.6.188:4848 && npm run overlay`
 
 Then: launch Marathon in borderless windowed, `⌃⇧Space` to prompt, play.
 
 ## Hotkey
 `Ctrl/Cmd+Shift+Space` toggles focus mode (type a prompt). `Esc` dismisses.
-Override with `DURANDAL_HOTKEY`.
+Override with `GABRIELE_HOTKEY`.

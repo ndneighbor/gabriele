@@ -1,4 +1,4 @@
-// Durandal overlay — runs on the gaming PC (or locally for testing).
+// Gabriele overlay — runs on the gaming PC (or locally for testing).
 // A transparent, always-on-top, click-through window that floats over the
 // game. It NEVER injects into the game process: it is just a separate top-most
 // window the OS composites on top. A global hotkey flips it from passive
@@ -9,9 +9,9 @@ const path = require('path');
 const fs = require('fs');
 
 // Where the bridge lives. Local test: 127.0.0.1. On the gaming PC, set
-// DURANDAL_URL=ws://<mac-lan-ip>:4848 (your Mac is 172.20.6.188).
-const WS_URL = process.env.DURANDAL_URL || 'ws://127.0.0.1:4848';
-const HOTKEY = process.env.DURANDAL_HOTKEY || 'CommandOrControl+Shift+Space';
+// GABRIELE_URL=ws://<mac-lan-ip>:4848 (your Mac is 172.20.6.188).
+const WS_URL = process.env.GABRIELE_URL || 'ws://127.0.0.1:4848';
+const HOTKEY = process.env.GABRIELE_HOTKEY || 'CommandOrControl+Shift+Space';
 
 let win;
 let focusMode = false;
@@ -67,15 +67,15 @@ function toggleFocus() {
 app.whenReady().then(() => {
   createWindow();
   const ok = globalShortcut.register(HOTKEY, toggleFocus);
-  console.log(`[durandal] overlay ready. bridge=${WS_URL} hotkey=${HOTKEY} registered=${ok}`);
+  console.log(`[gabriele] overlay ready. bridge=${WS_URL} hotkey=${HOTKEY} registered=${ok}`);
 
   // Renderer asks to drop back to passive (Esc, or after submitting a prompt).
   ipcMain.on('exit-focus', setPassive);
 
   // Debug-only: periodically capture the window itself (no screen-recording
-  // permission needed) so the HUD render can be verified. Set DURANDAL_SHOT=1.
-  if (process.env.DURANDAL_SHOT) {
-    const out = process.env.DURANDAL_SHOT_PATH || '/tmp/durandal_hud.png';
+  // permission needed) so the HUD render can be verified. Set GABRIELE_SHOT=1.
+  if (process.env.GABRIELE_SHOT) {
+    const out = process.env.GABRIELE_SHOT_PATH || '/tmp/gabriele_hud.png';
     setInterval(async () => {
       try {
         const img = await win.webContents.capturePage();

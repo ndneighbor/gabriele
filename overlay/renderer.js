@@ -1,4 +1,4 @@
-const { wsUrl, onFocus, exitFocus } = window.durandal;
+const { wsUrl, onFocus, exitFocus } = window.gabriele;
 
 const tilesEl = document.getElementById('tiles');
 const connEl = document.getElementById('conn');

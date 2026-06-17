@@ -1,4 +1,4 @@
-// Durandal bridge — runs on the Mac (where Claude Code lives).
+// Gabriele bridge — runs on the Mac (where Claude Code lives).
 // Owns the agents: spawns `claude` in stream-json mode, tracks each one's
 // state, and broadcasts it to any connected overlay over the LAN. Accepts
 // prompts back from the overlay (new agent, or follow-up via session resume).
@@ -6,15 +6,15 @@
 const { spawn } = require('child_process');
 const { WebSocketServer } = require('ws');
 
-const PORT = Number(process.env.DURANDAL_PORT || 4848);
-const CLAUDE = process.env.DURANDAL_CLAUDE || 'claude';
+const PORT = Number(process.env.GABRIELE_PORT || 4848);
+const CLAUDE = process.env.GABRIELE_CLAUDE || 'claude';
 
 // id -> { id, title, state, lastLine, sessionId, startedAt }
 const agents = new Map();
 let nextId = 1;
 
 const wss = new WebSocketServer({ host: '0.0.0.0', port: PORT });
-console.log(`[durandal] bridge listening on ws://0.0.0.0:${PORT}`);
+console.log(`[gabriele] bridge listening on ws://0.0.0.0:${PORT}`);
 
 function snapshot() {
   return { type: 'agents', agents: [...agents.values()] };

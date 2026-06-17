@@ -1,5 +1,5 @@
 {
-  "name": "durandal",
+  "name": "gabriele",
   "version": "0.0.1",
   "description": "Agent-first overlay terminal — supervise Claude Code agents from a HUD over your game.",
   "main": "overlay/main.js",
