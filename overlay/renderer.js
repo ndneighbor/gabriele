@@ -67,7 +67,7 @@ function render() {
     if (justSettled) flashEdge();
   }
   if (list.length === 0) {
-    tilesEl.innerHTML = `<div class="empty">no agents yet — ⌃⇧Space to dispatch one</div>`;
+    tilesEl.innerHTML = `<div class="empty">no agents yet — ⌥⇧Tab to dispatch one</div>`;
   }
 }
 

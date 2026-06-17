@@ -11,7 +11,7 @@ const fs = require('fs');
 // Where the bridge lives. Local test: 127.0.0.1. On the gaming PC, set
 // GABRIELE_URL=ws://<mac-lan-ip>:4848 (your Mac is 172.20.6.188).
 const WS_URL = process.env.GABRIELE_URL || 'ws://127.0.0.1:4848';
-const HOTKEY = process.env.GABRIELE_HOTKEY || 'CommandOrControl+Shift+Space';
+const HOTKEY = process.env.GABRIELE_HOTKEY || 'Alt+Shift+Tab';
 
 let win;
 let focusMode = false;

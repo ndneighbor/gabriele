@@ -9,7 +9,7 @@ agent is done. Named for the Marathon AI.
   ┌──────────── gaming PC ────────────┐        ┌──────────── Mac ────────────┐
   │  overlay  (Electron, top-most)    │  ws    │  bridge  (Node)             │
   │   • tiles by state                │◀──────▶│   • spawns `claude` agents  │
-  │   • ⌃⇧Space to prompt             │  LAN   │   • streams state back      │
+  │   • ⌥⇧Tab to prompt              │  LAN   │   • streams state back      │
   └───────────────────────────────────┘        └─────────────────────────────┘
 ```
 
@@ -23,7 +23,7 @@ windowed** so the OS can composite the overlay on top.
 npm install
 npm run bridge          # terminal 1 — the agent host
 npm run overlay         # terminal 2 — the HUD
-npm run send "say hi"   # terminal 3 — fire a test prompt (or use ⌃⇧Space)
+npm run send "say hi"   # terminal 3 — fire a test prompt (or use ⌥⇧Tab)
 ```
 
 ## Run (real: overlay on the gaming PC)
@@ -32,8 +32,11 @@ On the **Mac**: `npm run bridge`  (note the Mac's LAN IP, e.g. 172.20.6.188)
 
 On the **PC**: `set GABRIELE_URL=ws://172.20.6.188:4848 && npm run overlay`
 
-Then: launch Marathon in borderless windowed, `⌃⇧Space` to prompt, play.
+Then: launch Marathon in borderless windowed, `⌥⇧Tab` to prompt, play.
 
 ## Hotkey
-`Ctrl/Cmd+Shift+Space` toggles focus mode (type a prompt). `Esc` dismisses.
-Override with `GABRIELE_HOTKEY`.
+`Option+Shift+Tab` (macOS) / `Alt+Shift+Tab` toggles focus mode (type a prompt).
+`Esc` dismisses. Override with `GABRIELE_HOTKEY`.
+
+Note: on **Windows**, `Alt+Shift+Tab` is the OS reverse-window-switcher — pick a
+different combo there via `GABRIELE_HOTKEY` (e.g. `Alt+Shift+G`).
