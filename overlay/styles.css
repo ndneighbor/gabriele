@@ -14,6 +14,7 @@
   --running: var(--lime);
   --idle: var(--red);
   --exited: #5a5a62;
+  --gutter: 14px;           /* single horizontal gutter — every section aligns to it */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -67,7 +68,7 @@ body.focused #frame i { border-color: var(--lime); }
 /* ---- header / title bar ---- */
 #bar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 13px; border-bottom: 1px solid var(--line);
+  padding: 11px var(--gutter); border-bottom: 1px solid var(--line);
   -webkit-app-region: drag;
 }
 #rail, #term, .chip, button { -webkit-app-region: no-drag; }
@@ -88,13 +89,13 @@ body.focused #frame i { border-color: var(--lime); }
 
 /* ---- channel rail ---- */
 #rail {
-  display: flex; gap: 5px; padding: 8px 10px; overflow-x: auto;
+  display: flex; gap: 6px; padding: 9px var(--gutter); overflow-x: auto;
   border-bottom: 1px solid var(--line); flex: none;
 }
 #rail::-webkit-scrollbar { height: 0; }
 .chip {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 10px 5px 8px; white-space: nowrap; cursor: pointer;
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 9px; white-space: nowrap; cursor: pointer;
   background: var(--panel); color: var(--dim);
   border: 1px solid var(--line); border-radius: 2px;
   font: inherit; font-size: 10.5px;
@@ -132,13 +133,13 @@ body.focused #frame i { border-color: var(--lime); }
 .chip .x:hover { color: var(--red); background: rgba(232, 72, 62, 0.16); }
 
 /* ---- terminal pane ---- */
-#term { flex: 1; min-height: 0; padding: 6px 8px 2px; overflow: hidden; position: relative; z-index: 2; }
+#term { flex: 1; min-height: 0; padding: 9px var(--gutter) 4px; overflow: hidden; position: relative; z-index: 2; }
 #term .xterm, #term .xterm-viewport, #term .xterm-screen { height: 100% !important; }
 #term .xterm-viewport::-webkit-scrollbar { width: 0; }
 
 /* ---- footer ---- */
 #hint {
-  padding: 6px 13px; border-top: 1px solid var(--line);
+  padding: 8px var(--gutter); border-top: 1px solid var(--line);
   color: var(--dimmer); font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
 }
 
