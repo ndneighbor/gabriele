@@ -42,12 +42,11 @@ body.focused #app { opacity: 1; border-color: var(--line-2); }
 
 /* corner brackets (all four) */
 #frame { position: absolute; inset: 6px; pointer-events: none; z-index: 7; }
-#frame i { position: absolute; width: 11px; height: 11px; border: 1.5px solid rgba(255, 255, 255, 0.32); }
+#frame i { position: absolute; width: 8px; height: 8px; border: 1px solid rgba(255, 255, 255, 0.28); }
 #frame i:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; }
 #frame i:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; }
 #frame i:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
 #frame i:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
-body.focused #frame i { border-color: var(--lime); }
 
 /* film grain — self-contained SVG noise, desaturated, cheap stepped jitter */
 #grain {
