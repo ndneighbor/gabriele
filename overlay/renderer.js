@@ -13,9 +13,9 @@ let ws;
 
 // ---- terminal ----
 const term = new Terminal({
-  fontFamily: '"SF Mono", "JetBrains Mono", Menlo, Monaco, ui-monospace, monospace',
-  fontSize: 13,
-  lineHeight: 1.15,
+  fontFamily: '"Martian Mono", "SF Mono", ui-monospace, monospace',
+  fontSize: 12,
+  lineHeight: 1.2,
   cursorBlink: true,
   cursorStyle: 'bar',
   scrollback: 8000,

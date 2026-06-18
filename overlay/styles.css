@@ -19,7 +19,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { background: transparent; overflow: hidden; }
 body {
-  font: 12px/1.4 -apple-system, "SF Pro Text", "Inter", "Helvetica Neue", system-ui, sans-serif;
+  font: 11px/1.45 "Martian Mono", ui-monospace, "SF Mono", monospace;
   color: var(--text);
   -webkit-user-select: none; user-select: none;
 }
@@ -57,7 +57,8 @@ body.focused #frame i { border-color: var(--lime); }
 #rail, #term, .chip, button { -webkit-app-region: no-drag; }
 .brand {
   display: flex; align-items: center; gap: 9px;
-  font-weight: 700; letter-spacing: 3.5px; font-size: 11px; color: var(--text);
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-weight: 700; letter-spacing: 4px; font-size: 12px; color: var(--text);
 }
 .mark { color: var(--lime); flex: none; }
 #status {
