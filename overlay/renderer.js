@@ -11,6 +11,8 @@ const lastNotify = new Map(); // id -> last notify time (de-dupe mid-turn idle f
 let focusedId = null;
 let ws;
 let connected = false;
+const scrollPos = new Map(); // id -> scroll offset from bottom (spatial continuity)
+let lastClosed = null;       // {cmd, cwd} of the most recently closed channel (⌘⇧T reopen)
 
 // ---- terminal ----
 const term = new Terminal({
@@ -58,6 +60,7 @@ term.attachCustomKeyEventHandler((e) => {
     return false;
   }
   if (e.key === 'w') { if (focusedId) closeSession(focusedId); return false; } // ⌘W close pane
+  if (e.shiftKey && e.key.toLowerCase() === 't') { reopenLast(); return false; } // ⌘⇧T reopen last closed
   if (e.key === 't') { newSession(); return false; }                          // ⌘T new pane
   return true;
 });
@@ -74,7 +77,17 @@ function newSession() {
 }
 
 function closeSession(id) {
+  const s = sessions.get(id);
+  if (s) lastClosed = { cmd: s.cmd, cwd: s.cwd };   // remember for ⌘⇧T reopen
   if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'close', id }));
+}
+
+function reopenLast() {
+  if (!lastClosed || ws?.readyState !== 1) return;
+  // claude resumes the last conversation in that cwd via --continue (transcript persists)
+  const args = /claude/.test(lastClosed.cmd || '') ? ['--continue'] : [];
+  ws.send(JSON.stringify({ type: 'new', cmd: lastClosed.cmd, cwd: lastClosed.cwd, args, cols: term.cols, rows: term.rows }));
+  lastClosed = null;
 }
 
 // ---- websocket ----
@@ -117,12 +130,19 @@ function handle(msg) {
       if (msg.id === focusedId) term.write(msg.data);
       break;
     case 'snapshot':
-      if (msg.id === focusedId) { term.reset(); term.write(msg.data); }
+      if (msg.id === focusedId) {
+        term.reset();
+        const off = scrollPos.get(msg.id) || 0;
+        term.write(msg.data, () => {           // restore scroll once the replay is rendered
+          if (off > 0) { try { term.scrollToLine(Math.max(0, term.buffer.active.baseY - off)); } catch {} }
+        });
+      }
       break;
     case 'closed':
       sessions.delete(msg.id);
       settled.delete(msg.id);
       lastNotify.delete(msg.id);
+      scrollPos.delete(msg.id);
       if (focusedId === msg.id) {
         focusedId = null;
         const next = [...sessions.keys()][0];
@@ -135,11 +155,15 @@ function handle(msg) {
 }
 
 function focus(id) {
+  if (focusedId && focusedId !== id) scrollPos.set(focusedId, scrollOffset()); // remember where we were
   focusedId = id;
   term.reset();
   if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'focus', id })); // replay scrollback
   sendResize();
   renderRail();
+}
+function scrollOffset() {
+  try { const b = term.buffer.active; return Math.max(0, b.baseY - b.viewportY); } catch { return 0; }
 }
 
 function setConn(on) {
