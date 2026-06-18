@@ -10,6 +10,7 @@ const settled = new Set();   // session ids that idled once already (skip startu
 const lastNotify = new Map(); // id -> last notify time (de-dupe mid-turn idle flaps)
 let focusedId = null;
 let ws;
+let connected = false;
 
 // ---- terminal ----
 const term = new Terminal({
@@ -142,9 +143,9 @@ function focus(id) {
 }
 
 function setConn(on) {
-  if (!connEl) return; // "Live" badge removed for now; wiring kept dormant
-  connEl.textContent = on ? 'live' : 'offline';
-  connEl.classList.toggle('off', !on);
+  connected = on;
+  document.body.classList.toggle('offline', !on);
+  renderStatus();
 }
 
 function flashEdge() {
@@ -180,6 +181,7 @@ function esc(s) {
 
 function renderStatus() {
   if (!statusEl) return;
+  if (!connected) { statusEl.innerHTML = '<b class="s-err">◇ BRIDGE OFFLINE</b>'; return; }
   const c = { running: 0, idle: 0, error: 0 };
   for (const s of sessions.values()) if (c[s.state] != null) c[s.state]++;
   const parts = [];
