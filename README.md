@@ -3,7 +3,7 @@
 An **agent-first overlay terminal**. A translucent, always-on-top HUD that floats
 over your game and lets you supervise Claude Code agents in your peripheral
 vision — fire a prompt with a hotkey, keep playing, watch the tile pulse when the
-agent is done. Named for the Marathon AI.
+agent is done. Named after my brother, as we like to say: "Just tell Gabriele."
 
 ```
   ┌──────────── gaming PC ────────────┐        ┌──────────── Mac ────────────┐
