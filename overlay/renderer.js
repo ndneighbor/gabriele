@@ -55,6 +55,8 @@ term.attachCustomKeyEventHandler((e) => {
     if (t && focusedId && ws?.readyState === 1) ws.send(JSON.stringify({ type: 'input', id: focusedId, data: t }));
     return false;
   }
+  if (e.key === 'w') { if (focusedId) closeSession(focusedId); return false; } // ⌘W close pane
+  if (e.key === 't') { newSession(); return false; }                          // ⌘T new pane
   return true;
 });
 
@@ -67,6 +69,10 @@ window.addEventListener('resize', sendResize);
 
 function newSession() {
   if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'new', cols: term.cols, rows: term.rows }));
+}
+
+function closeSession(id) {
+  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'close', id }));
 }
 
 // ---- websocket ----
@@ -111,6 +117,18 @@ function handle(msg) {
     case 'snapshot':
       if (msg.id === focusedId) { term.reset(); term.write(msg.data); }
       break;
+    case 'closed':
+      sessions.delete(msg.id);
+      settled.delete(msg.id);
+      lastNotify.delete(msg.id);
+      if (focusedId === msg.id) {
+        focusedId = null;
+        const next = [...sessions.keys()][0];
+        if (next) focus(next);
+        else term.reset();          // none left — blank pane, '+' to spawn a new one
+      }
+      renderRail();
+      break;
   }
 }
 
@@ -140,8 +158,9 @@ function renderRail() {
   for (const s of list) {
     const chip = document.createElement('button');
     chip.className = `chip ${s.state}` + (s.id === focusedId ? ' active' : '');
-    chip.innerHTML = `<span class="dot"></span><span class="ctitle">${esc(s.title)}</span>`;
+    chip.innerHTML = `<span class="dot"></span><span class="ctitle">${esc(s.title)}</span><span class="x" title="close (⌘W)">×</span>`;
     chip.onclick = () => focus(s.id);
+    chip.querySelector('.x').onclick = (e) => { e.stopPropagation(); closeSession(s.id); };
     railEl.appendChild(chip);
   }
   const add = document.createElement('button');

@@ -64,6 +64,7 @@ function createSession({ cmd, args, cwd, title, cols, rows } = {}) {
   });
 
   term.onExit(({ exitCode }) => {
+    if (!sessions.has(s.id)) return; // already closed/removed by the user
     clearTimeout(s.idleTimer);
     s.state = 'exited';
     broadcast({ type: 'exit', id: s.id, code: exitCode });
@@ -98,6 +99,14 @@ wss.on('connection', (ws) => {
         break;
       case 'kill':
         if (s) { try { s.pty.kill(); } catch {} }
+        break;
+      case 'close': // kill the PTY AND remove the session entirely
+        if (s) {
+          sessions.delete(s.id);
+          clearTimeout(s.idleTimer);
+          try { s.pty.kill(); } catch {}
+          broadcast({ type: 'closed', id: s.id });
+        }
         break;
     }
   });

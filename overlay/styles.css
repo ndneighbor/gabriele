@@ -133,6 +133,11 @@ body.focused #app {
 .chip.exited .ctitle { text-decoration: line-through; color: var(--dim); }
 .chip.active { border-color: var(--done); background: rgba(74, 163, 255, 0.13); }
 .chip.add { font-weight: 700; color: var(--dim); padding: 5px 11px; }
+.chip .x {
+  margin-left: 3px; color: var(--idle); font-size: 13px; line-height: 1;
+  padding: 0 3px; border-radius: 4px; opacity: 0.6;
+}
+.chip .x:hover { color: var(--error); background: rgba(255, 92, 92, 0.14); opacity: 1; }
 
 /* ---- terminal pane ---- */
 #term { flex: 1; min-height: 0; padding: 6px 8px 2px; overflow: hidden; }
