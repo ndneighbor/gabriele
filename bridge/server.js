@@ -26,6 +26,7 @@ function broadcast(msg) {
   for (const c of wss.clients) if (c.readyState === 1) c.send(data);
 }
 function setState(s, state) {
+  if (!sessions.has(s.id)) return; // closed/removed — don't resurrect it
   if (s.state === state) return;
   s.state = state;
   broadcast({ type: 'session', meta: meta(s) });
@@ -61,6 +62,7 @@ function createSession({ cmd, args, cwd, title, cols, rows } = {}) {
   sessions.set(s.id, s);
 
   term.onData((data) => {
+    if (!sessions.has(s.id)) return; // closed/removed — ignore late output
     s.buffer += data;
     if (s.buffer.length > BUFFER_CAP) s.buffer = s.buffer.slice(-BUFFER_CAP);
     broadcast({ type: 'data', id: s.id, data });
