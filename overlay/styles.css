@@ -31,7 +31,7 @@ body {
   display: flex; flex-direction: column;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 0;
   backdrop-filter: blur(9px) saturate(1.02);
   overflow: hidden;
   opacity: 0.95;
@@ -96,7 +96,7 @@ body.focused #app { opacity: 1; border-color: var(--line-2); }
   display: flex; align-items: center; gap: 7px;
   padding: 5px 9px; white-space: nowrap; cursor: pointer;
   background: var(--panel); color: var(--dim);
-  border: 1px solid var(--line); border-radius: 2px;
+  border: 1px solid var(--line); border-radius: 0;
   font: inherit; font-size: 10.5px;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
 }
@@ -127,7 +127,7 @@ body.focused #app { opacity: 1; border-color: var(--line-2); }
 .chip .x {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; margin-left: 3px; margin-right: -3px; flex: none;
-  color: var(--dimmer); font-size: 14px; line-height: 1; border-radius: 2px;
+  color: var(--dimmer); font-size: 14px; line-height: 1; border-radius: 0;
 }
 .chip .x:hover { color: var(--red); background: rgba(232, 72, 62, 0.16); }
 
@@ -144,7 +144,7 @@ body.focused #app { opacity: 1; border-color: var(--line-2); }
 
 /* ---- motion ---- */
 /* attention flash when an agent needs you — red, sharp (one-shot, not infinite) */
-#edge { position: absolute; inset: 0; border-radius: 3px; pointer-events: none; opacity: 0; z-index: 8;
+#edge { position: absolute; inset: 0; border-radius: 0; pointer-events: none; opacity: 0; z-index: 8;
   box-shadow: inset 0 0 0 1.5px var(--red); }
 #edge.flash { animation: edgeflash 850ms ease-out 1; }
 @keyframes edgeflash { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
