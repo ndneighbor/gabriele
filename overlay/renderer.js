@@ -123,6 +123,7 @@ function focus(id) {
 }
 
 function setConn(on) {
+  if (!connEl) return; // "Live" badge removed for now; wiring kept dormant
   connEl.textContent = on ? 'live' : 'offline';
   connEl.classList.toggle('off', !on);
 }
