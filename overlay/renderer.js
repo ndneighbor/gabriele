@@ -62,6 +62,9 @@ term.attachCustomKeyEventHandler((e) => {
   if (e.key === 'w') { if (focusedId) closeSession(focusedId); return false; } // ⌘W close pane
   if (e.shiftKey && e.key.toLowerCase() === 't') { reopenLast(); return false; } // ⌘⇧T reopen last closed
   if (e.key === 't') { newSession(); return false; }                          // ⌘T new pane
+  if (e.code === 'BracketLeft')  { cycleFocus(-1); return false; }             // ⌘[ previous tab
+  if (e.code === 'BracketRight') { cycleFocus(1); return false; }             // ⌘] next tab
+  if (e.key >= '1' && e.key <= '9') { focusByIndex(+e.key - 1); return false; } // ⌘1-9 jump to tab
   return true;
 });
 
@@ -178,18 +181,32 @@ function flashEdge() {
   edgeEl.classList.add('flash');
 }
 
+function orderedSessions() {
+  return [...sessions.values()].sort((a, b) => a.startedAt - b.startedAt);
+}
+function focusByIndex(i) {
+  const list = orderedSessions();
+  if (list[i]) focus(list[i].id);
+}
+function cycleFocus(dir) {
+  const list = orderedSessions();
+  if (list.length < 2) return;
+  const idx = list.findIndex((s) => s.id === focusedId);
+  const next = list[(Math.max(0, idx) + dir + list.length) % list.length];
+  if (next) focus(next.id);
+}
+
 function renderRail() {
   railEl.innerHTML = '';
-  const list = [...sessions.values()].sort((a, b) => a.startedAt - b.startedAt);
-  for (const s of list) {
+  orderedSessions().forEach((s, i) => {
     const chip = document.createElement('button');
     chip.className = `chip ${s.state}` + (s.id === focusedId ? ' active' : '');
     const label = (s.cmd || s.title || '').split('/').pop().split(' ')[0] || 'sh';
-    chip.innerHTML = `<span class="dot"></span><span class="ch">CH-${esc(s.id)}</span><span class="ctitle">${esc(label)}</span><span class="x" title="close (⌘W)">×</span>`;
+    chip.innerHTML = `<span class="dot"></span><span class="ch">CH-${i + 1}</span><span class="ctitle">${esc(label)}</span><span class="x" title="close (⌘W)">×</span>`;
     chip.onclick = () => focus(s.id);
     chip.querySelector('.x').onclick = (e) => { e.stopPropagation(); closeSession(s.id); };
     railEl.appendChild(chip);
-  }
+  });
   renderStatus();
   const add = document.createElement('button');
   add.className = 'chip add';
