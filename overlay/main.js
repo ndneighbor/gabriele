@@ -18,7 +18,7 @@ let focusMode = false;
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  const W = 380, H = 540, margin = 24;
+  const W = 600, H = 640, margin = 24;
 
   win = new BrowserWindow({
     width: W,
@@ -43,6 +43,8 @@ function createWindow() {
   setPassive();
 
   win.loadFile(path.join(__dirname, 'index.html'), { hash: encodeURIComponent(WS_URL) });
+  // forward renderer console to this process's stdout (dev aid)
+  win.webContents.on('console-message', (_e, _lvl, msg) => console.log('[renderer]', msg));
 }
 
 function setPassive() {

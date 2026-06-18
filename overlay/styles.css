@@ -106,3 +106,29 @@ body.focused #app { opacity: 1; background: var(--bg-focus); }
   20% { opacity: 0.9; }
   100% { opacity: 0; }
 }
+
+/* ---- session rail (the agent-status HUD) ---- */
+#rail {
+  display: flex; gap: 6px; padding: 8px 10px; overflow-x: auto;
+  border-bottom: 1px solid var(--line); flex: none;
+}
+#rail::-webkit-scrollbar { height: 0; }
+.chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; white-space: nowrap; cursor: pointer;
+  background: rgba(255, 255, 255, 0.04); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-size: 11px;
+}
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); flex: none; }
+.chip.running .dot { background: var(--running); animation: pulse 1.1s ease-in-out infinite; }
+.chip.idle .dot    { background: var(--blocked); }   /* idle = likely awaiting you */
+.chip.exited .dot  { background: var(--idle); }
+.chip.exited .ctitle { text-decoration: line-through; color: var(--dim); }
+.chip.active { border-color: var(--done); background: rgba(74, 163, 255, 0.13); }
+.chip.add { font-weight: 700; color: var(--dim); padding: 5px 11px; }
+
+/* ---- terminal pane ---- */
+#term { flex: 1; min-height: 0; padding: 6px 8px 2px; overflow: hidden; }
+#term .xterm, #term .xterm-viewport, #term .xterm-screen { height: 100% !important; }
+#term .xterm-viewport::-webkit-scrollbar { width: 0; }

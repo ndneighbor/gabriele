@@ -1,14 +1,17 @@
 {
   "name": "gabriele",
   "version": "0.0.1",
-  "description": "Agent-first overlay terminal — supervise Claude Code agents from a HUD over your game.",
+  "description": "Agent-first overlay terminal — real PTY terminals + agent-status HUD, floating over your game.",
   "main": "overlay/main.js",
   "scripts": {
     "bridge": "node bridge/server.js",
     "overlay": "electron .",
-    "send": "node bridge/send.js"
+    "postinstall": "node scripts/fix-pty.js"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
