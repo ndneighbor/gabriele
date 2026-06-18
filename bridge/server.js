@@ -30,14 +30,14 @@ function setState(s, state) {
   broadcast({ type: 'session', meta: meta(s) });
 }
 
-function createSession({ cmd, args, cwd, title } = {}) {
+function createSession({ cmd, args, cwd, title, cols, rows } = {}) {
   cmd = cmd || DEFAULT_CMD;
   cwd = cwd || DEFAULT_CWD;
   args = args || [];
 
   const term = pty.spawn(cmd, args, {
     name: 'xterm-256color',
-    cols: 80, rows: 24,
+    cols: cols || 80, rows: rows || 24,
     cwd,
     env: { ...process.env, TERM: 'xterm-256color' },
   });

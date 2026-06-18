@@ -31,12 +31,18 @@ body {
   opacity: 0.92;
   transition: opacity 140ms ease, background 140ms ease;
 }
-body.focused #app { opacity: 1; background: var(--bg-focus); }
+body.focused #app {
+  opacity: 1; background: var(--bg-focus);
+  border-color: rgba(74, 163, 255, 0.45);
+  box-shadow: 0 0 0 1px rgba(74, 163, 255, 0.22), 0 8px 40px rgba(0, 0, 0, 0.45);
+}
 
 #bar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 14px; border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;   /* drag the header to move the window */
 }
+#rail, #term, .chip, button { -webkit-app-region: no-drag; }
 .brand { font-weight: 700; letter-spacing: 2.5px; font-size: 11px; color: #cfd6e4; }
 .conn { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--running); }
 .conn.off { color: var(--idle); }

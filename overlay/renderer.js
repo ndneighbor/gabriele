@@ -1,4 +1,4 @@
-const { wsUrl, onFocus } = window.gabriele;
+const { wsUrl, onFocus, clipboard } = window.gabriele;
 
 const railEl = document.getElementById('rail');
 const connEl = document.getElementById('conn');
@@ -10,24 +10,50 @@ let ws;
 
 // ---- terminal ----
 const term = new Terminal({
-  fontFamily: 'Menlo, Monaco, "SF Mono", ui-monospace, monospace',
-  fontSize: 12,
+  fontFamily: '"SF Mono", "JetBrains Mono", Menlo, Monaco, ui-monospace, monospace',
+  fontSize: 13,
+  lineHeight: 1.15,
   cursorBlink: true,
+  cursorStyle: 'bar',
+  scrollback: 8000,
   allowTransparency: true,
   theme: {
     background: 'rgba(0,0,0,0)',
     foreground: '#e7ebf2',
     cursor: '#4aa3ff',
-    selectionBackground: 'rgba(74,163,255,0.3)',
+    cursorAccent: '#0e1016',
+    selectionBackground: 'rgba(74,163,255,0.30)',
+    black: '#2a2f3a', red: '#ff6b6b', green: '#3ddc84', yellow: '#ffc24a',
+    blue: '#5aa9ff', magenta: '#c792ea', cyan: '#56d4dd', white: '#c9d1e0',
+    brightBlack: '#5a6273', brightRed: '#ff8585', brightGreen: '#6ef0a6',
+    brightYellow: '#ffd479', brightBlue: '#82bdff', brightMagenta: '#e0b0ff',
+    brightCyan: '#7fe9f0', brightWhite: '#eef2f8',
   },
 });
 const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
 term.open(document.getElementById('term'));
 setTimeout(() => sendResize(), 0);
+new ResizeObserver(() => sendResize()).observe(document.getElementById('term'));
 
 term.onData((d) => {
   if (focusedId) ws?.readyState === 1 && ws.send(JSON.stringify({ type: 'input', id: focusedId, data: d }));
+});
+
+// clipboard: copy-on-select (iTerm-style) + ⌘C / ⌘V
+term.onSelectionChange(() => {
+  const sel = term.getSelection();
+  if (sel) clipboard.write(sel);
+});
+term.attachCustomKeyEventHandler((e) => {
+  if (e.type !== 'keydown' || !e.metaKey) return true;
+  if (e.key === 'c' && term.hasSelection()) { clipboard.write(term.getSelection()); return false; }
+  if (e.key === 'v') {
+    const t = clipboard.read();
+    if (t && focusedId && ws?.readyState === 1) ws.send(JSON.stringify({ type: 'input', id: focusedId, data: t }));
+    return false;
+  }
+  return true;
 });
 
 function sendResize() {
@@ -36,6 +62,10 @@ function sendResize() {
     ws.send(JSON.stringify({ type: 'resize', id: focusedId, cols: term.cols, rows: term.rows }));
 }
 window.addEventListener('resize', sendResize);
+
+function newSession() {
+  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'new', cols: term.cols, rows: term.rows }));
+}
 
 // ---- websocket ----
 function connect() {
@@ -52,7 +82,7 @@ function handle(msg) {
       sessions.clear();
       for (const m of msg.sessions) sessions.set(m.id, m);
       renderRail();
-      if (sessions.size === 0) ws.send(JSON.stringify({ type: 'new' }));       // bootstrap one
+      if (sessions.size === 0) newSession();                                   // bootstrap one
       else if (!focusedId) focus([...sessions.keys()][0]);
       break;
     case 'session': {
@@ -106,7 +136,7 @@ function renderRail() {
   add.className = 'chip add';
   add.textContent = '+';
   add.title = 'new session';
-  add.onclick = () => ws?.readyState === 1 && ws.send(JSON.stringify({ type: 'new' }));
+  add.onclick = () => newSession();
   railEl.appendChild(add);
 }
 
