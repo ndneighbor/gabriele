@@ -1,6 +1,7 @@
 const { wsUrl, onFocus, clipboard, notify, onFocusSession } = window.gabriele;
 
 const railEl = document.getElementById('rail');
+const statusEl = document.getElementById('status');
 const connEl = document.getElementById('conn');
 const edgeEl = document.getElementById('edge');
 
@@ -21,15 +22,15 @@ const term = new Terminal({
   allowTransparency: true,
   theme: {
     background: 'rgba(0,0,0,0)',
-    foreground: '#e7ebf2',
-    cursor: '#4aa3ff',
-    cursorAccent: '#0e1016',
-    selectionBackground: 'rgba(74,163,255,0.30)',
-    black: '#2a2f3a', red: '#ff6b6b', green: '#3ddc84', yellow: '#ffc24a',
-    blue: '#5aa9ff', magenta: '#c792ea', cyan: '#56d4dd', white: '#c9d1e0',
-    brightBlack: '#5a6273', brightRed: '#ff8585', brightGreen: '#6ef0a6',
-    brightYellow: '#ffd479', brightBlue: '#82bdff', brightMagenta: '#e0b0ff',
-    brightCyan: '#7fe9f0', brightWhite: '#eef2f8',
+    foreground: '#8fe7b0',
+    cursor: '#3df08a',
+    cursorAccent: '#02070a',
+    selectionBackground: 'rgba(61,240,138,0.25)',
+    black: '#0a1410', red: '#ff6b62', green: '#3df08a', yellow: '#ffb454',
+    blue: '#5fd9c8', magenta: '#b98cff', cyan: '#56e8c8', white: '#bfe9cf',
+    brightBlack: '#3a5a48', brightRed: '#ff8b82', brightGreen: '#6effa6',
+    brightYellow: '#ffd479', brightBlue: '#8fe9dd', brightMagenta: '#d0b0ff',
+    brightCyan: '#7ff0d8', brightWhite: '#dffae8',
   },
 });
 const fit = new FitAddon.FitAddon();
@@ -158,11 +159,13 @@ function renderRail() {
   for (const s of list) {
     const chip = document.createElement('button');
     chip.className = `chip ${s.state}` + (s.id === focusedId ? ' active' : '');
-    chip.innerHTML = `<span class="dot"></span><span class="ctitle">${esc(s.title)}</span><span class="x" title="close (⌘W)">×</span>`;
+    const label = (s.cmd || s.title || '').split('/').pop().split(' ')[0] || 'sh';
+    chip.innerHTML = `<span class="dot"></span><span class="ch">CH-${esc(s.id)}</span><span class="ctitle">${esc(label)}</span><span class="x" title="close (⌘W)">×</span>`;
     chip.onclick = () => focus(s.id);
     chip.querySelector('.x').onclick = (e) => { e.stopPropagation(); closeSession(s.id); };
     railEl.appendChild(chip);
   }
+  renderStatus();
   const add = document.createElement('button');
   add.className = 'chip add';
   add.textContent = '+';
@@ -173,6 +176,17 @@ function renderRail() {
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function renderStatus() {
+  if (!statusEl) return;
+  const c = { running: 0, idle: 0, error: 0 };
+  for (const s of sessions.values()) if (c[s.state] != null) c[s.state]++;
+  const parts = [];
+  if (c.running) parts.push(`<b class="s-run">${c.running} RUN</b>`);
+  if (c.idle) parts.push(`<b class="s-idle">${c.idle} IDLE</b>`);
+  if (c.error) parts.push(`<b class="s-err">${c.error} ERR</b>`);
+  statusEl.innerHTML = parts.join('&nbsp;·&nbsp;') || 'NO CHANNELS';
 }
 
 const NOTIFY_COOLDOWN_MS = 10000;
