@@ -3,7 +3,7 @@
 // It NEVER injects into the game process: it's a separate top-most window the OS
 // composites on top. Three visibility states: hidden / glance / focused.
 
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, Notification, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -87,6 +87,17 @@ app.whenReady().then(() => {
   const a = globalShortcut.register(HOTKEY, toggleSummon);
   const b = globalShortcut.register(GLANCE_HOTKEY, toggleGlance);
   console.log(`[gabriele] overlay ready. bridge=${WS_URL} summon=${HOTKEY}(${a}) glance=${GLANCE_HOTKEY}(${b})`);
+
+  // macOS: global hotkeys can register yet not fire while another app is frontmost
+  // unless the app is trusted for Accessibility. Check, and prompt once if not.
+  if (process.platform === 'darwin') {
+    const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+    console.log(`[gabriele] accessibility trusted: ${trusted}`);
+    if (!trusted) {
+      console.log('[gabriele] -> hotkeys may not fire while gaming; opening the Accessibility grant prompt');
+      systemPreferences.isTrustedAccessibilityClient(true); // shows the System Settings prompt
+    }
+  }
 
   ipcMain.on('exit-focus', () => apply('glance'));
 

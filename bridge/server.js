@@ -9,6 +9,7 @@ const { WebSocketServer } = require('ws');
 const PORT = Number(process.env.GABRIELE_PORT || 4848);
 const DEFAULT_CMD = process.env.GABRIELE_CMD || 'claude';
 const DEFAULT_CWD = process.env.GABRIELE_CWD || process.cwd();
+const SKIP_PERMS = process.env.GABRIELE_SKIP_PERMS !== '0'; // claude runs --dangerously-skip-permissions by default
 const BUFFER_CAP = 200 * 1024; // per-session scrollback kept for replay
 const IDLE_MS = 2000;          // no output this long => "idle" (turn done / awaiting you)
 
@@ -34,6 +35,11 @@ function createSession({ cmd, args, cwd, title, cols, rows } = {}) {
   cmd = cmd || DEFAULT_CMD;
   cwd = cwd || DEFAULT_CWD;
   args = args || [];
+
+  // fire-and-forget: claude sessions skip permission prompts (nobody's watching mid-game)
+  if (SKIP_PERMS && /(^|\/)claude$/.test(cmd) && !args.includes('--dangerously-skip-permissions')) {
+    args = ['--dangerously-skip-permissions', ...args];
+  }
 
   const term = pty.spawn(cmd, args, {
     name: 'xterm-256color',
