@@ -10,7 +10,7 @@ const PORT = Number(process.env.GABRIELE_PORT || 4848);
 const DEFAULT_CMD = process.env.GABRIELE_CMD || 'claude';
 const DEFAULT_CWD = process.env.GABRIELE_CWD || process.cwd();
 const BUFFER_CAP = 200 * 1024; // per-session scrollback kept for replay
-const IDLE_MS = 1500;          // no output this long => "idle" (likely awaiting you)
+const IDLE_MS = 2000;          // no output this long => "idle" (turn done / awaiting you)
 
 // id -> { id, title, cwd, cmd, state, startedAt, pty, buffer, idleTimer }
 const sessions = new Map();

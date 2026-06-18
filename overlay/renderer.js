@@ -1,10 +1,12 @@
-const { wsUrl, onFocus, clipboard } = window.gabriele;
+const { wsUrl, onFocus, clipboard, notify, onFocusSession } = window.gabriele;
 
 const railEl = document.getElementById('rail');
 const connEl = document.getElementById('conn');
 const edgeEl = document.getElementById('edge');
 
 const sessions = new Map(); // id -> meta
+const settled = new Set();   // session ids that idled once already (skip startup render)
+const lastNotify = new Map(); // id -> last notify time (de-dupe mid-turn idle flaps)
 let focusedId = null;
 let ws;
 
@@ -87,11 +89,20 @@ function handle(msg) {
       break;
     case 'session': {
       const prev = sessions.get(msg.meta.id);
-      sessions.set(msg.meta.id, msg.meta);
+      const m = msg.meta, was = prev?.state;
+      sessions.set(m.id, m);
       renderRail();
-      if (!focusedId) focus(msg.meta.id);
-      if (prev && prev.state !== msg.meta.state && (msg.meta.state === 'idle' || msg.meta.state === 'exited'))
-        flashEdge();
+      if (!focusedId) focus(m.id);
+      if (was && was !== m.state && (m.state === 'idle' || m.state === 'exited')) flashEdge();
+      // "claude responded": a claude session finishes a turn (running -> idle).
+      // Skip its very first idle — that's the startup render, not a response.
+      if (was === 'running' && /claude/.test(m.cmd || '')) {
+        if (m.state === 'exited') fire('Session ended', m);
+        else if (m.state === 'idle') {
+          if (settled.has(m.id)) fire('Claude responded', m);
+          else settled.add(m.id);
+        }
+      }
       break;
     }
     case 'data':
@@ -144,10 +155,21 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+const NOTIFY_COOLDOWN_MS = 10000;
+function fire(title, m) {
+  const now = Date.now();
+  if (now - (lastNotify.get(m.id) || 0) < NOTIFY_COOLDOWN_MS) return; // collapse mid-turn idle flaps
+  lastNotify.set(m.id, now);
+  notify({ title, body: m.title, id: m.id });
+}
+
 // ---- focus mode (global hotkey via main) ----
 onFocus((on) => {
   document.body.classList.toggle('focused', on);
   if (on) { term.focus(); sendResize(); } else { term.blur(); }
 });
+
+// notification click → main summons us, we jump to that session
+onFocusSession((id) => { if (sessions.has(id)) focus(id); });
 
 connect();

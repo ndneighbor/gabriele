@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld('gabriele', {
     write: (t) => clipboard.writeText(t),
     read: () => clipboard.readText(),
   },
+  notify: (payload) => ipcRenderer.send('notify', payload),
+  onFocusSession: (cb) => ipcRenderer.on('focus-session', (_e, id) => cb(id)),
 });
