@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld('gabriele', {
   },
   notify: (payload) => ipcRenderer.send('notify', payload),
   onFocusSession: (cb) => ipcRenderer.on('focus-session', (_e, id) => cb(id)),
+  setInteractive: (on) => ipcRenderer.send('interactive', on),
 });

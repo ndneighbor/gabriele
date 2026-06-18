@@ -101,6 +101,13 @@ app.whenReady().then(() => {
 
   ipcMain.on('exit-focus', () => apply('glance'));
 
+  // In glance the window is click-through; the renderer flips this off while the
+  // cursor is over interactive chrome (rail/header) so chips, ×, +, and drag work
+  // without summoning. No-op in focused (already interactive) / hidden.
+  ipcMain.on('interactive', (_e, on) => {
+    if (state === 'glance') win.setIgnoreMouseEvents(!on, { forward: true });
+  });
+
   // Native notification when a claude session finishes a turn (renderer decides
   // when). Suppressed while focused — you're already looking. Click → summon to
   // that session.

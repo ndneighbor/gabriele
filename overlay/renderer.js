@@ -192,4 +192,12 @@ onFocus((on) => {
 // notification click → main summons us, we jump to that session
 onFocusSession((id) => { if (sessions.has(id)) focus(id); });
 
+// In glance the window is click-through; make the chrome (rail + header)
+// clickable while hovered so you can close/switch panes without summoning.
+// (Mouse-move is forwarded in glance, so these fire even when click-through.)
+for (const el of [railEl, document.getElementById('bar')]) {
+  el.addEventListener('mouseenter', () => window.gabriele.setInteractive(true));
+  el.addEventListener('mouseleave', () => window.gabriele.setInteractive(false));
+}
+
 connect();
