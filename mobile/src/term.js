@@ -26,6 +26,8 @@ const HTML = `<!doctype html><html><head>
   function emitSize(){ post({ t: 'size', cols: term.cols, rows: term.rows }); }
   function refit(){ try { fit.fit(); } catch(e){} emitSize(); }
   refit(); window.addEventListener('resize', refit);
+  try { new ResizeObserver(refit).observe(document.getElementById('t')); } catch(e){} // refit once the WebView actually has its size
+  setTimeout(refit, 300);
   window.__write = function(d){ term.write(d); };
   window.__reset = function(d){ term.reset(); if (d) term.write(d); };
 </script></body></html>`;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  StatusBar, KeyboardAvoidingView, Platform, SafeAreaView, ActivityIndicator,
+  StatusBar, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createRelay } from './src/relay';
@@ -88,7 +88,7 @@ export default function App() {
   // ---- connect screen ----
   if (!cfg) {
     return (
-      <SafeAreaView style={s.fill}>
+      <View style={s.fill}>
         <StatusBar barStyle="light-content" />
         <View style={s.connectWrap}>
           <Text style={s.brand}>GABRIELE</Text>
@@ -114,7 +114,7 @@ export default function App() {
   const statusColor = (!connected || !hostPresent) ? C.red : C.dim;
 
   return (
-    <SafeAreaView style={s.fill}>
+    <View style={s.fill}>
       <StatusBar barStyle="light-content" />
       <View style={s.header}>
         <Text style={s.brand} onPress={forget}>GABRIELE</Text>
@@ -160,7 +160,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
