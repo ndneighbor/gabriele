@@ -22,17 +22,17 @@ const HTML = `<!doctype html><html><head>
   });
   var fit = new FitAddon.FitAddon(); term.loadAddon(fit);
   term.open(document.getElementById('t'));
-  function refit(){ try { fit.fit(); } catch(e){} }
+  function post(o){ window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(o)); }
+  function emitSize(){ post({ t: 'size', cols: term.cols, rows: term.rows }); }
+  function refit(){ try { fit.fit(); } catch(e){} emitSize(); }
   refit(); window.addEventListener('resize', refit);
   window.__write = function(d){ term.write(d); };
   window.__reset = function(d){ term.reset(); if (d) term.write(d); };
-  function post(o){ window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(o)); }
-  post({ t: 'ready', cols: term.cols, rows: term.rows });
 </script></body></html>`;
 
 const SOURCE = { html: HTML }; // stable ref so the WebView never reloads on re-render
 
-export const Term = memo(forwardRef(({ onReady }, ref) => {
+export const Term = memo(forwardRef(({ onSize }, ref) => {
   const wv = useRef(null);
   useImperativeHandle(ref, () => ({
     write: (d) => wv.current && wv.current.injectJavaScript(`window.__write(${JSON.stringify(d)});true;`),
@@ -48,7 +48,7 @@ export const Term = memo(forwardRef(({ onReady }, ref) => {
       domStorageEnabled
       scrollEnabled={false}
       onMessage={(e) => {
-        try { const m = JSON.parse(e.nativeEvent.data); if (m.t === 'ready' && onReady) onReady(m); } catch {}
+        try { const m = JSON.parse(e.nativeEvent.data); if (m.t === 'size' && onSize) onSize(m.cols, m.rows); } catch {}
       }}
     />
   );

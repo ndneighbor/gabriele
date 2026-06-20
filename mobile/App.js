@@ -31,6 +31,8 @@ export default function App() {
 
   const relayRef = useRef(null);
   const termRef = useRef(null);
+  const termSize = useRef({ cols: 80, rows: 24 });
+  const termReady = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -56,9 +58,12 @@ export default function App() {
     return () => relayRef.current && relayRef.current.disconnect();
   }, [cfg]);
 
-  const onTermReady = useCallback(() => {
+  const onSize = useCallback((cols, rows) => {
+    termSize.current = { cols: cols || 80, rows: rows || 24 };
     const r = relayRef.current;
-    if (r && r.focusedId) r.focus(r.focusedId); // re-pull scrollback now the term exists
+    if (!r) return;
+    r.resize(termSize.current.cols, termSize.current.rows); // keep the PTY matched to the phone (fixes garbled wrap)
+    if (!termReady.current) { termReady.current = true; if (r.focusedId) r.focus(r.focusedId); } // pull scrollback once
   }, []);
 
   const sendKey = (seq) => relayRef.current && relayRef.current.input(seq);
@@ -122,7 +127,8 @@ export default function App() {
           const dot = c.state === 'running' ? C.lime : c.state === 'idle' ? C.red : C.exited;
           const label = (c.cmd || '').split('/').pop().split(' ')[0] || 'sh';
           return (
-            <TouchableOpacity key={c.id} onPress={() => relayRef.current.focus(c.id)}
+            <TouchableOpacity key={c.id}
+              onPress={() => { relayRef.current.focus(c.id); relayRef.current.resize(termSize.current.cols, termSize.current.rows); }}
               style={[s.chip, active && s.chipActive]}>
               <View style={[s.dot, { backgroundColor: dot }]} />
               <Text style={[s.chipCh, active && s.chipChActive]}>CH-{i + 1}</Text>
@@ -130,12 +136,12 @@ export default function App() {
             </TouchableOpacity>
           );
         })}
-        <TouchableOpacity style={[s.chip, s.chipAdd]} onPress={() => relayRef.current.newSession()}>
+        <TouchableOpacity style={[s.chip, s.chipAdd]} onPress={() => relayRef.current.newSession(termSize.current.cols, termSize.current.rows)}>
           <Text style={s.chipAddText}>+</Text>
         </TouchableOpacity>
       </ScrollView>
 
-      <View style={s.termWrap}><Term ref={termRef} onReady={onTermReady} /></View>
+      <View style={s.termWrap}><Term ref={termRef} onSize={onSize} /></View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={s.keyRow}>
@@ -159,7 +165,7 @@ export default function App() {
 }
 
 const s = StyleSheet.create({
-  fill: { flex: 1, backgroundColor: C.bg },
+  fill: { flex: 1, backgroundColor: C.bg, paddingTop: StatusBar.currentHeight || 0 },
   center: { alignItems: 'center', justifyContent: 'center' },
   brand: { color: C.text, fontWeight: '700', letterSpacing: 3, fontSize: 13, fontFamily: MONO },
 

@@ -67,12 +67,13 @@ export function createRelay({ url, token, on = {} }) {
 
   function focus(id) { focusedId = id; send({ type: 'focus', id }); emitChannels(); }
   function input(data) { if (focusedId) send({ type: 'input', id: focusedId, data }); }
+  function resize(cols, rows) { if (focusedId) send({ type: 'resize', id: focusedId, cols, rows }); }
   function newSession(cols = 80, rows = 24) { send({ type: 'new', cols, rows }); }
   function close(id) { send({ type: 'close', id }); }
 
   connect();
   return {
-    focus, input, newSession, close, send, ordered,
+    focus, input, resize, newSession, close, send, ordered,
     get focusedId() { return focusedId; },
     disconnect() { try { ws && ws.close(); } catch {} },
   };
