@@ -12,6 +12,7 @@ app.setName('Gabriele');
 // Bridge location. Local test: 127.0.0.1. On the gaming PC, set
 // GABRIELE_URL=ws://<mac-lan-ip>:4848 (your Mac is 172.20.6.188).
 const WS_URL = process.env.GABRIELE_URL || 'ws://127.0.0.1:4848';
+const TOKEN = process.env.GABRIELE_TOKEN || '';                           // set => relay/auth mode
 const HOTKEY = process.env.GABRIELE_HOTKEY || 'Alt+Shift+Tab';            // summon(type) / hide
 const GLANCE_HOTKEY = process.env.GABRIELE_GLANCE_HOTKEY || 'Alt+Shift+G'; // glance / hide
 
@@ -35,7 +36,7 @@ function createWindow() {
   });
 
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.loadFile(path.join(__dirname, 'index.html'), { hash: encodeURIComponent(WS_URL) });
+  win.loadFile(path.join(__dirname, 'index.html'), { hash: encodeURIComponent(JSON.stringify({ url: WS_URL, token: TOKEN })) });
   win.webContents.on('console-message', (_e, _lvl, msg) => console.log('[renderer]', msg));
   win.webContents.once('did-finish-load', () => apply('glance'));
 }

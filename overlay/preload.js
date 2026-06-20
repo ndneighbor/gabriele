@@ -1,7 +1,11 @@
 const { contextBridge, ipcRenderer, clipboard } = require('electron');
 
+// main passes {url, token} via the location hash (JSON). token set => relay/auth mode.
+const cfg = (() => { try { return JSON.parse(decodeURIComponent((location.hash || '').slice(1))); } catch { return {}; } })();
+
 contextBridge.exposeInMainWorld('gabriele', {
-  wsUrl: decodeURIComponent((location.hash || '').slice(1)) || 'ws://127.0.0.1:4848',
+  wsUrl: cfg.url || 'ws://127.0.0.1:4848',
+  token: cfg.token || '',
   onFocus: (cb) => ipcRenderer.on('focus', (_e, on) => cb(on)),
   exitFocus: () => ipcRenderer.send('exit-focus'),
   clipboard: {

@@ -1,4 +1,5 @@
-const { wsUrl, onFocus, clipboard, notify, onFocusSession } = window.gabriele;
+const { wsUrl, token, onFocus, clipboard, notify, onFocusSession } = window.gabriele;
+const RELAY = !!token; // token set => connect via the relay: send hello, wait for hello_ok
 
 const railEl = document.getElementById('rail');
 const statusEl = document.getElementById('status');
@@ -11,6 +12,7 @@ const lastNotify = new Map(); // id -> last notify time (de-dupe mid-turn idle f
 let focusedId = null;
 let ws;
 let connected = false;
+let ready = false; // true once it's safe to send app messages (after auth in relay mode)
 const scrollPos = new Map(); // id -> scroll offset from bottom (spatial continuity)
 let lastClosed = null;       // {cmd, cwd} of the most recently closed channel (⌘⇧T reopen)
 
@@ -43,7 +45,7 @@ setTimeout(() => sendResize(), 0);
 new ResizeObserver(() => sendResize()).observe(document.getElementById('term'));
 
 term.onData((d) => {
-  if (focusedId) ws?.readyState === 1 && ws.send(JSON.stringify({ type: 'input', id: focusedId, data: d }));
+  if (focusedId) wsSend({ type: 'input', id: focusedId, data: d });
 });
 
 // clipboard: copy-on-select (iTerm-style) + ⌘C / ⌘V
@@ -56,7 +58,7 @@ term.attachCustomKeyEventHandler((e) => {
   if (e.key === 'c' && term.hasSelection()) { clipboard.write(term.getSelection()); return false; }
   if (e.key === 'v') {
     const t = clipboard.read();
-    if (t && focusedId && ws?.readyState === 1) ws.send(JSON.stringify({ type: 'input', id: focusedId, data: t }));
+    if (t && focusedId) wsSend({ type: 'input', id: focusedId, data: t });
     return false;
   }
   if (e.key === 'w') { if (focusedId) closeSession(focusedId); return false; } // ⌘W close pane
@@ -68,42 +70,65 @@ term.attachCustomKeyEventHandler((e) => {
   return true;
 });
 
+function wsSend(obj) {
+  if (ready && ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+}
+
 function sendResize() {
   try { fit.fit(); } catch {}
-  if (focusedId && ws?.readyState === 1)
-    ws.send(JSON.stringify({ type: 'resize', id: focusedId, cols: term.cols, rows: term.rows }));
+  if (focusedId) wsSend({ type: 'resize', id: focusedId, cols: term.cols, rows: term.rows });
 }
 window.addEventListener('resize', sendResize);
 
 function newSession() {
-  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'new', cols: term.cols, rows: term.rows }));
+  wsSend({ type: 'new', cols: term.cols, rows: term.rows });
 }
 
 function closeSession(id) {
   const s = sessions.get(id);
   if (s) lastClosed = { cmd: s.cmd, cwd: s.cwd };   // remember for ⌘⇧T reopen
-  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'close', id }));
+  wsSend({ type: 'close', id });
 }
 
 function reopenLast() {
-  if (!lastClosed || ws?.readyState !== 1) return;
+  if (!lastClosed) return;
   // claude resumes the last conversation in that cwd via --continue (transcript persists)
   const args = /claude/.test(lastClosed.cmd || '') ? ['--continue'] : [];
-  ws.send(JSON.stringify({ type: 'new', cmd: lastClosed.cmd, cwd: lastClosed.cwd, args, cols: term.cols, rows: term.rows }));
+  wsSend({ type: 'new', cmd: lastClosed.cmd, cwd: lastClosed.cwd, args, cols: term.cols, rows: term.rows });
   lastClosed = null;
 }
 
 // ---- websocket ----
 function connect() {
+  ready = false;
   ws = new WebSocket(wsUrl);
-  ws.onopen = () => setConn(true);
-  ws.onclose = () => { setConn(false); setTimeout(connect, 1200); };
+  ws.onopen = () => {
+    if (RELAY) ws.send(JSON.stringify({ type: 'hello', role: 'client', token })); // auth, then wait for hello_ok
+    else onReady(true);                                                            // direct LAN bridge: live now
+  };
+  ws.onclose = () => { ready = false; setConn(false); setTimeout(connect, 1200); };
   ws.onerror = () => ws.close();
   ws.onmessage = (e) => handle(JSON.parse(e.data));
 }
 
+function onReady(hostPresent) {
+  ready = true;
+  setConn(hostPresent);     // direct: connected · relay: only if the Mac bridge is live
+  wsSend({ type: 'sync' });  // pull the current session list
+}
+
 function handle(msg) {
   switch (msg.type) {
+    case 'hello_ok':                       // relay accepted us
+      onReady(msg.host_present !== false);
+      break;
+    case 'host_up':                        // the Mac bridge (re)connected to the relay
+      setConn(true);
+      wsSend({ type: 'sync' });
+      break;
+    case 'host_down':                      // the Mac bridge dropped off the relay
+      setConn(false);
+      break;
     case 'sessions':
       sessions.clear();
       for (const m of msg.sessions) sessions.set(m.id, m);
@@ -161,7 +186,7 @@ function focus(id) {
   if (focusedId && focusedId !== id) scrollPos.set(focusedId, scrollOffset()); // remember where we were
   focusedId = id;
   term.reset();
-  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'focus', id })); // replay scrollback
+  wsSend({ type: 'focus', id }); // replay scrollback
   sendResize();
   renderRail();
 }
