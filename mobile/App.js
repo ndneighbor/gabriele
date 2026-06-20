@@ -103,7 +103,7 @@ export default function App() {
             <Text style={s.connectBtnText}>CONNECT</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
