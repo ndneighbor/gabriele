@@ -6,6 +6,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createRelay } from './src/relay';
 import { HandoffCard } from './src/HandoffCard';
+import { ApprovalCard } from './src/ApprovalCard';
 import { NotificationFeed } from './src/NotificationFeed';
 import { Term } from './src/term';
 
@@ -33,10 +34,12 @@ export default function App() {
   const [focusedId, setFocusedId] = useState(null);
   const [prompt, setPrompt] = useState('');
   const [handoffs, setHandoffs] = useState([]);
+  const [approvals, setApprovals] = useState([]);
   const [notes, setNotes] = useState([]);
   const [profiles, setProfiles] = useState([]);
   const [defaultProfile, setDefaultProfile] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [guard, setGuard] = useState(false); // new channels require tool approval
 
   const relayRef = useRef(null);
   const termRef = useRef(null);
@@ -51,6 +54,7 @@ export default function App() {
       if (url && token) setCfg({ url, token, mcp });
       if (url) setUrlInput(url);
       if (mcp) setMcpInput(mcp);
+      setGuard((await AsyncStorage.getItem('gab.guard')) === '1');
       setLoaded(true);
     })();
   }, []);
@@ -73,11 +77,20 @@ export default function App() {
   // Poll the MCP service: handoffs (active, needs you) + the notifications feed
   // (passive, finished turns). Long buzz for a handoff, short tick for a turn.
   useEffect(() => {
-    if (!cfg?.mcp) { setHandoffs([]); setNotes([]); return; }
+    if (!cfg?.mcp) { setHandoffs([]); setApprovals([]); setNotes([]); return; }
     const base = cfg.mcp.replace(/\/+$/, '');
-    let alive = true, primedH = false, primedN = false, lastNoteId = 0;
-    const seen = new Set();
+    let alive = true, primedH = false, primedA = false, primedN = false, lastNoteId = 0;
+    const seen = new Set(), seenA = new Set();
     async function poll() {
+      try {
+        const r = await fetch(`${base}/approvals`, { headers: { authorization: `Bearer ${cfg.token}` } });
+        if (alive && r.ok) {
+          const list = (await r.json()).approvals || [];
+          for (const a of list) if (!seenA.has(a.id)) { seenA.add(a.id); if (primedA) Vibration.vibrate([0, 200, 120, 200]); }
+          primedA = true;
+          if (alive) setApprovals(list);
+        }
+      } catch {}
       try {
         const r = await fetch(`${base}/handoffs`, { headers: { authorization: `Bearer ${cfg.token}` } });
         if (alive && r.ok) {
@@ -117,6 +130,18 @@ export default function App() {
     } catch {}
   }
 
+  async function decideApproval(id, decision) {
+    if (!cfg?.mcp) return;
+    setApprovals((as) => as.filter((a) => a.id !== id)); // optimistic — unblocks the agent
+    try {
+      await fetch(`${cfg.mcp.replace(/\/+$/, '')}/approvals/${id}/decide`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.token}` },
+        body: JSON.stringify({ decision }),
+      });
+    } catch {}
+  }
+
   const onSize = useCallback((cols, rows) => {
     termSize.current = { cols: cols || 80, rows: rows || 24 };
     const r = relayRef.current;
@@ -127,7 +152,7 @@ export default function App() {
 
   const sendKey = (seq) => relayRef.current && relayRef.current.input(seq);
   const sendPrompt = () => { if (prompt.trim() && relayRef.current) { relayRef.current.input(prompt + '\r'); setPrompt(''); } };
-  const addChannel = (profile) => { setPickerOpen(false); relayRef.current && relayRef.current.newSession(termSize.current.cols, termSize.current.rows, profile || defaultProfile); };
+  const addChannel = (profile) => { setPickerOpen(false); relayRef.current && relayRef.current.newSession(termSize.current.cols, termSize.current.rows, profile || defaultProfile, guard); };
   const onPlus = () => (profiles.length > 1 ? setPickerOpen(true) : addChannel(defaultProfile)); // pick a login if there's more than one
 
   function saveAndConnect() {
@@ -139,7 +164,7 @@ export default function App() {
   function forget() {
     AsyncStorage.removeItem('gab.token');
     if (relayRef.current) relayRef.current.disconnect();
-    setCfg(null); setConnected(false); setHostPresent(false); setChannels([]); setFocusedId(null); setHandoffs([]); setNotes([]);
+    setCfg(null); setConnected(false); setHostPresent(false); setChannels([]); setFocusedId(null); setHandoffs([]); setApprovals([]); setNotes([]);
   }
 
   if (!loaded) {
@@ -182,8 +207,19 @@ export default function App() {
       <StatusBar barStyle="light-content" />
       <View style={s.header}>
         <Text style={s.brand} onPress={forget}>GABRIELE</Text>
-        <Text style={[s.status, { color: statusColor }]}>{status}</Text>
+        <View style={s.headerRight}>
+          <TouchableOpacity onPress={() => setGuard((g) => { const n = !g; AsyncStorage.setItem('gab.guard', n ? '1' : '0'); return n; })}>
+            <Text style={[s.guard, guard && s.guardOn]}>{guard ? '◆ GUARD' : '◇ OPEN'}</Text>
+          </TouchableOpacity>
+          <Text style={[s.status, { color: statusColor }]}>{status}</Text>
+        </View>
       </View>
+
+      {approvals.length > 0 && (
+        <View style={s.handoffStack}>
+          {approvals.map((a) => <ApprovalCard key={a.id} approval={a} onDecide={decideApproval} />)}
+        </View>
+      )}
 
       {handoffs.length > 0 && (
         <View style={s.handoffStack}>
@@ -206,6 +242,7 @@ export default function App() {
               {profiles.length > 1 && !!c.profile && (
                 <Text style={[s.chipProfile, active && s.chipLabelActive]}>{String(c.profile).toUpperCase()}</Text>
               )}
+              {c.approvals && <Text style={[s.chipGuard, active && s.chipLabelActive]}>◆</Text>}
             </TouchableOpacity>
           );
         })}
@@ -267,6 +304,10 @@ const s = StyleSheet.create({
 
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.line },
   status: { letterSpacing: 1.5, fontSize: 11, fontFamily: MONO },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  guard: { color: C.dim, letterSpacing: 1.5, fontSize: 11, fontFamily: MONO },
+  guardOn: { color: C.lime },
+  chipGuard: { color: C.lime, fontSize: 11, paddingLeft: 6 },
 
   handoffStack: { padding: 8, paddingBottom: 0 },
 

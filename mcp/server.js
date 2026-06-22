@@ -152,4 +152,40 @@ app.get('/notifications', auth, (req, res) => {
   res.json({ notifications: list });
 });
 
+// ---- approvals: a blocking PreToolUse hook POSTs a proposed tool here and waits;
+// the phone decides allow/deny. On timeout we return 'ask' (fall back to the normal
+// prompt) — never auto-allow. This is what makes it safe to run agents unwatched. ----
+const APPROVAL_TIMEOUT_MS = Number(process.env.GABRIELE_APPROVAL_TIMEOUT_MS || 90 * 1000);
+const approvals = new Map(); // id -> { id, agent, tool, input, cwd, createdAt, resolve }
+function postApproval(meta) {
+  const id = randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { if (approvals.delete(id)) resolve('ask'); }, APPROVAL_TIMEOUT_MS);
+    approvals.set(id, { ...meta, id, createdAt: Date.now(), resolve: (d) => { clearTimeout(timer); approvals.delete(id); resolve(d); } });
+  });
+}
+app.post('/approvals', auth, async (req, res) => {
+  const b = req.body || {};
+  const tool = (b.tool || '').toString();
+  if (!tool) return res.status(400).json({ error: 'missing tool' });
+  const decision = await postApproval({
+    agent: (b.agent || 'agent').toString().slice(0, 60),
+    tool: tool.slice(0, 120),
+    input: (typeof b.input === 'string' ? b.input : JSON.stringify(b.input || '')).slice(0, 2000),
+    cwd: (b.cwd || '').toString(),
+  });
+  res.json({ decision }); // 'allow' | 'deny' | 'ask'
+});
+app.get('/approvals', auth, (_req, res) => {
+  res.json({ approvals: [...approvals.values()].map(({ resolve, ...a }) => a) });
+});
+app.post('/approvals/:id/decide', auth, (req, res) => {
+  const a = approvals.get(req.params.id);
+  if (!a) return res.status(404).json({ error: 'no such pending approval' });
+  const decision = ((req.body && req.body.decision) || '').toString();
+  if (!['allow', 'deny', 'ask'].includes(decision)) return res.status(400).json({ error: 'decision must be allow|deny|ask' });
+  a.resolve(decision);
+  res.json({ ok: true });
+});
+
 app.listen(PORT, () => console.log(`[gabriele-mcp] listening on :${PORT} (token ${TOKEN === 'dev-secret' ? 'DEV' : 'set'})`));

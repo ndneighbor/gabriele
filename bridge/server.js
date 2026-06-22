@@ -46,7 +46,7 @@ let relayAuthed = false;
 const wss = new WebSocketServer({ host: '0.0.0.0', port: PORT });
 console.log(`[gabriele] bridge listening on ws://0.0.0.0:${PORT}`);
 
-const meta = (s) => ({ id: s.id, title: s.title, cwd: s.cwd, cmd: s.cmd, state: s.state, startedAt: s.startedAt, profile: s.profile, profileLabel: s.profileLabel });
+const meta = (s) => ({ id: s.id, title: s.title, cwd: s.cwd, cmd: s.cmd, state: s.state, startedAt: s.startedAt, profile: s.profile, profileLabel: s.profileLabel, approvals: s.approvals });
 const profilesList = () => PROFILES.map((p) => ({ id: p.id, label: p.label }));
 const sessionsSnapshot = () => ({ type: 'sessions', sessions: [...sessions.values()].map(meta), profiles: profilesList(), defaultProfile: DEFAULT_PROFILE });
 
@@ -62,13 +62,15 @@ function setState(s, state) {
   broadcast({ type: 'session', meta: meta(s) });
 }
 
-function createSession({ cmd, args, cwd, title, cols, rows, profile } = {}) {
+function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals } = {}) {
   cmd = cmd || DEFAULT_CMD;
   cwd = cwd || DEFAULT_CWD;
   args = args || [];
 
   // fire-and-forget: claude sessions skip permission prompts (nobody's watching mid-game)
-  if (SKIP_PERMS && /(^|\/)claude$/.test(cmd) && !args.includes('--dangerously-skip-permissions')) {
+  // — UNLESS this is an approval-mode channel, which keeps permissions ON so the
+  // PreToolUse hook can route each tool to the phone for allow/deny.
+  if (!approvals && SKIP_PERMS && /(^|\/)claude$/.test(cmd) && !args.includes('--dangerously-skip-permissions')) {
     args = ['--dangerously-skip-permissions', ...args];
   }
 
@@ -77,6 +79,8 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile } = {}) {
   const env = { ...process.env, TERM: 'xterm-256color' };
   if (prof && prof.configDir) env.CLAUDE_CONFIG_DIR = expandHome(prof.configDir);
   else delete env.CLAUDE_CONFIG_DIR; // "default" profile = the standard ~/.claude, regardless of how the bridge was launched
+  if (approvals) env.GABRIELE_APPROVALS = '1'; // PreToolUse hook routes this channel's tool calls to the phone
+  else delete env.GABRIELE_APPROVALS;
 
   const term = pty.spawn(cmd, args, {
     name: 'xterm-256color',
@@ -91,6 +95,7 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile } = {}) {
     cwd, cmd,
     profile: prof ? prof.id : null,
     profileLabel: prof ? prof.label : null,
+    approvals: !!approvals,
     state: 'running',
     startedAt: Date.now(),
     pty: term,
