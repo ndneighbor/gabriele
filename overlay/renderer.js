@@ -14,7 +14,9 @@ let ws;
 let connected = false;
 let ready = false; // true once it's safe to send app messages (after auth in relay mode)
 const scrollPos = new Map(); // id -> scroll offset from bottom (spatial continuity)
-let lastClosed = null;       // {cmd, cwd} of the most recently closed channel (⌘⇧T reopen)
+let lastClosed = null;       // {cmd, cwd, profile} of the most recently closed channel (⌘⇧T reopen)
+let profiles = [];           // [{id,label}] logins advertised by the relay/bridge
+let defaultProfile = null;
 
 // ---- terminal ----
 const term = new Terminal({
@@ -63,7 +65,7 @@ term.attachCustomKeyEventHandler((e) => {
   }
   if (e.key === 'w') { if (focusedId) closeSession(focusedId); return false; } // ⌘W close pane
   if (e.shiftKey && e.key.toLowerCase() === 't') { reopenLast(); return false; } // ⌘⇧T reopen last closed
-  if (e.key === 't') { newSession(); return false; }                          // ⌘T new pane
+  if (e.key === 't') { newChannel(); return false; }                          // ⌘T new pane (profile picker if >1 login)
   if (e.code === 'BracketLeft')  { cycleFocus(-1); return false; }             // ⌘[ previous tab
   if (e.code === 'BracketRight') { cycleFocus(1); return false; }             // ⌘] next tab
   if (e.key >= '1' && e.key <= '9') { focusByIndex(+e.key - 1); return false; } // ⌘1-9 jump to tab
@@ -80,13 +82,32 @@ function sendResize() {
 }
 window.addEventListener('resize', sendResize);
 
-function newSession() {
-  wsSend({ type: 'new', cols: term.cols, rows: term.rows });
+function newSession(profile) {
+  wsSend({ type: 'new', cols: term.cols, rows: term.rows, profile: profile || defaultProfile });
 }
+
+// ⌘T / + : pick which login the new channel runs under (only when >1 exists)
+function newChannel() {
+  if (profiles.length <= 1) { newSession(defaultProfile); return; }
+  closePicker();
+  const pop = document.createElement('div');
+  pop.id = 'picker';
+  pop.innerHTML = '<div class="pk-h">NEW CHANNEL · PROFILE</div>' +
+    profiles.map((p) => `<button class="pk-row" data-id="${esc(p.id)}"><span>${esc(p.label)}</span>${p.id === defaultProfile ? '<em>DEFAULT</em>' : ''}</button>`).join('');
+  document.body.appendChild(pop);
+  const addBtn = railEl.querySelector('.chip.add');
+  if (addBtn) { const r = addBtn.getBoundingClientRect(); pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 216)) + 'px'; pop.style.top = (r.bottom + 6) + 'px'; }
+  pop.querySelectorAll('.pk-row').forEach((b) => (b.onclick = () => { newSession(b.dataset.id); closePicker(); }));
+  pop.addEventListener('mouseenter', () => window.gabriele.setInteractive(true));   // clickable in glance
+  pop.addEventListener('mouseleave', () => window.gabriele.setInteractive(false));
+  setTimeout(() => document.addEventListener('mousedown', onPickerOutside), 0);
+}
+function onPickerOutside(e) { const p = document.getElementById('picker'); if (p && !p.contains(e.target)) closePicker(); }
+function closePicker() { const p = document.getElementById('picker'); if (p) p.remove(); document.removeEventListener('mousedown', onPickerOutside); }
 
 function closeSession(id) {
   const s = sessions.get(id);
-  if (s) lastClosed = { cmd: s.cmd, cwd: s.cwd };   // remember for ⌘⇧T reopen
+  if (s) lastClosed = { cmd: s.cmd, cwd: s.cwd, profile: s.profile };   // remember for ⌘⇧T reopen
   wsSend({ type: 'close', id });
 }
 
@@ -94,7 +115,7 @@ function reopenLast() {
   if (!lastClosed) return;
   // claude resumes the last conversation in that cwd via --continue (transcript persists)
   const args = /claude/.test(lastClosed.cmd || '') ? ['--continue'] : [];
-  wsSend({ type: 'new', cmd: lastClosed.cmd, cwd: lastClosed.cwd, args, cols: term.cols, rows: term.rows });
+  wsSend({ type: 'new', cmd: lastClosed.cmd, cwd: lastClosed.cwd, args, profile: lastClosed.profile, cols: term.cols, rows: term.rows });
   lastClosed = null;
 }
 
@@ -130,6 +151,7 @@ function handle(msg) {
       setConn(false);
       break;
     case 'sessions':
+      if (msg.profiles) { profiles = msg.profiles; defaultProfile = msg.defaultProfile || (profiles[0] && profiles[0].id) || null; }
       sessions.clear();
       for (const m of msg.sessions) sessions.set(m.id, m);
       renderRail();
@@ -226,7 +248,8 @@ function renderRail() {
     const chip = document.createElement('button');
     chip.className = `chip ${s.state}` + (s.id === focusedId ? ' active' : '');
     const label = (s.cmd || s.title || '').split('/').pop().split(' ')[0] || 'sh';
-    chip.innerHTML = `<span class="dot"></span><span class="ch">CH-${i + 1}</span><span class="ctitle">${esc(label)}</span><span class="x" title="close (⌘W)">×</span>`;
+    const prof = (profiles.length > 1 && s.profile) ? `<span class="cprof">${esc(String(s.profile).toUpperCase())}</span>` : '';
+    chip.innerHTML = `<span class="dot"></span><span class="ch">CH-${i + 1}</span><span class="ctitle">${esc(label)}</span>${prof}<span class="x" title="close (⌘W)">×</span>`;
     chip.onclick = () => focus(s.id);
     chip.querySelector('.x').onclick = (e) => { e.stopPropagation(); closeSession(s.id); };
     railEl.appendChild(chip);
@@ -236,7 +259,7 @@ function renderRail() {
   add.className = 'chip add';
   add.textContent = '+';
   add.title = 'new session';
-  add.onclick = () => newSession();
+  add.onclick = () => newChannel();
   railEl.appendChild(add);
 }
 
@@ -280,5 +303,7 @@ for (const el of [railEl, document.getElementById('bar')]) {
   el.addEventListener('mouseenter', () => window.gabriele.setInteractive(true));
   el.addEventListener('mouseleave', () => window.gabriele.setInteractive(false));
 }
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
 
 connect();

@@ -148,3 +148,15 @@ body.focused #app { opacity: 1; border-color: var(--line-2); }
   box-shadow: inset 0 0 0 1.5px var(--red); }
 #edge.flash { animation: edgeflash 850ms ease-out 1; }
 @keyframes edgeflash { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
+
+/* per-channel profile badge (which login the channel runs under) */
+.chip .cprof { color: var(--lime); letter-spacing: 1px; font-size: 9px; padding-left: 7px; border-left: 1px solid var(--line-2); }
+.chip.active .cprof { color: var(--ink); border-left-color: rgba(0, 0, 0, 0.25); }
+
+/* profile picker popup (⌘T / + when >1 login) */
+#picker { position: fixed; z-index: 60; min-width: 208px; background: #16181c; border: 1px solid var(--line-2); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
+#picker .pk-h { padding: 9px 12px; font-size: 9px; letter-spacing: 2px; color: var(--dim); border-bottom: 1px solid var(--line); }
+#picker .pk-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; background: none; border: 0; border-bottom: 1px solid var(--line); color: var(--text); font: inherit; font-size: 12px; letter-spacing: 0.5px; text-align: left; cursor: pointer; }
+#picker .pk-row:last-child { border-bottom: 0; }
+#picker .pk-row:hover { background: rgba(194, 236, 58, 0.08); }
+#picker .pk-row em { color: var(--lime); font-style: normal; font-size: 9px; letter-spacing: 1.5px; }
