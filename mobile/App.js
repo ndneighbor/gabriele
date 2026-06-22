@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  StatusBar, KeyboardAvoidingView, Platform, ActivityIndicator,
+  StatusBar, KeyboardAvoidingView, Platform, ActivityIndicator, Vibration,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createRelay } from './src/relay';
+import { HandoffCard } from './src/HandoffCard';
 import { Term } from './src/term';
 
 const C = {
@@ -12,6 +13,7 @@ const C = {
   text: '#ececef', dim: '#80808a', lime: '#c2ec3a', ink: '#0d0f08', red: '#e8483e', exited: '#5a5a62',
 };
 const DEFAULT_URL = 'wss://gabriele-relay-production.up.railway.app/ws';
+const DEFAULT_MCP = 'https://gabriele-mcp-production.up.railway.app'; // handoff bridge (optional)
 const MONO = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 const KEYS = [
   { label: 'ESC', seq: '\x1b' }, { label: 'TAB', seq: '\t' }, { label: '^C', seq: '\x03' },
@@ -23,11 +25,13 @@ export default function App() {
   const [cfg, setCfg] = useState(null);            // {url, token}
   const [urlInput, setUrlInput] = useState(DEFAULT_URL);
   const [tokenInput, setTokenInput] = useState('');
+  const [mcpInput, setMcpInput] = useState(DEFAULT_MCP);
   const [connected, setConnected] = useState(false);
   const [hostPresent, setHostPresent] = useState(false);
   const [channels, setChannels] = useState([]);
   const [focusedId, setFocusedId] = useState(null);
   const [prompt, setPrompt] = useState('');
+  const [handoffs, setHandoffs] = useState([]);
 
   const relayRef = useRef(null);
   const termRef = useRef(null);
@@ -38,8 +42,10 @@ export default function App() {
     (async () => {
       const url = (await AsyncStorage.getItem('gab.url')) || '';
       const token = (await AsyncStorage.getItem('gab.token')) || '';
-      if (url && token) setCfg({ url, token });
+      const mcp = (await AsyncStorage.getItem('gab.mcp')) ?? DEFAULT_MCP;
+      if (url && token) setCfg({ url, token, mcp });
       if (url) setUrlInput(url);
+      if (mcp) setMcpInput(mcp);
       setLoaded(true);
     })();
   }, []);
@@ -58,6 +64,42 @@ export default function App() {
     return () => relayRef.current && relayRef.current.disconnect();
   }, [cfg]);
 
+  // Poll the handoff bridge (separate MCP service) for pending agent → operator
+  // handoffs. Vibrate when a new one arrives — that's the "an agent needs you" buzz.
+  useEffect(() => {
+    if (!cfg?.mcp) { setHandoffs([]); return; }
+    const base = cfg.mcp.replace(/\/+$/, '');
+    let alive = true, primed = false;
+    const seen = new Set();
+    async function poll() {
+      try {
+        const r = await fetch(`${base}/handoffs`, { headers: { authorization: `Bearer ${cfg.token}` } });
+        if (!alive || !r.ok) return;
+        const j = await r.json();
+        if (!alive) return;
+        const list = j.handoffs || [];
+        for (const h of list) if (!seen.has(h.id)) { seen.add(h.id); if (primed) Vibration.vibrate(400); }
+        primed = true;
+        setHandoffs(list);
+      } catch {}
+    }
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => { alive = false; clearInterval(t); };
+  }, [cfg]);
+
+  async function replyHandoff(id, text) {
+    if (!cfg?.mcp) return;
+    setHandoffs((hs) => hs.filter((h) => h.id !== id)); // optimistic remove
+    try {
+      await fetch(`${cfg.mcp.replace(/\/+$/, '')}/handoffs/${id}/reply`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.token}` },
+        body: JSON.stringify({ text }),
+      });
+    } catch {}
+  }
+
   const onSize = useCallback((cols, rows) => {
     termSize.current = { cols: cols || 80, rows: rows || 24 };
     const r = relayRef.current;
@@ -70,15 +112,15 @@ export default function App() {
   const sendPrompt = () => { if (prompt.trim() && relayRef.current) { relayRef.current.input(prompt + '\r'); setPrompt(''); } };
 
   function saveAndConnect() {
-    const url = urlInput.trim(), token = tokenInput.trim();
+    const url = urlInput.trim(), token = tokenInput.trim(), mcp = mcpInput.trim();
     if (!url || !token) return;
-    AsyncStorage.setItem('gab.url', url); AsyncStorage.setItem('gab.token', token);
-    setCfg({ url, token });
+    AsyncStorage.setItem('gab.url', url); AsyncStorage.setItem('gab.token', token); AsyncStorage.setItem('gab.mcp', mcp);
+    setCfg({ url, token, mcp });
   }
   function forget() {
     AsyncStorage.removeItem('gab.token');
     if (relayRef.current) relayRef.current.disconnect();
-    setCfg(null); setConnected(false); setHostPresent(false); setChannels([]); setFocusedId(null);
+    setCfg(null); setConnected(false); setHostPresent(false); setChannels([]); setFocusedId(null); setHandoffs([]);
   }
 
   if (!loaded) {
@@ -99,6 +141,9 @@ export default function App() {
           <Text style={s.fieldLabel}>TOKEN</Text>
           <TextInput style={s.input} value={tokenInput} onChangeText={setTokenInput}
             autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="shared secret" placeholderTextColor={C.dim} />
+          <Text style={s.fieldLabel}>HANDOFF URL (OPTIONAL)</Text>
+          <TextInput style={s.input} value={mcpInput} onChangeText={setMcpInput}
+            autoCapitalize="none" autoCorrect={false} placeholder="https://…mcp host" placeholderTextColor={C.dim} />
           <TouchableOpacity style={s.connectBtn} onPress={saveAndConnect}>
             <Text style={s.connectBtnText}>CONNECT</Text>
           </TouchableOpacity>
@@ -120,6 +165,12 @@ export default function App() {
         <Text style={s.brand} onPress={forget}>GABRIELE</Text>
         <Text style={[s.status, { color: statusColor }]}>{status}</Text>
       </View>
+
+      {handoffs.length > 0 && (
+        <View style={s.handoffStack}>
+          {handoffs.map((h) => <HandoffCard key={h.id} handoff={h} onReply={replyHandoff} />)}
+        </View>
+      )}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.rail} contentContainerStyle={s.railInner}>
         {channels.map((c, i) => {
@@ -178,6 +229,8 @@ const s = StyleSheet.create({
 
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.line },
   status: { letterSpacing: 1.5, fontSize: 11, fontFamily: MONO },
+
+  handoffStack: { padding: 8, paddingBottom: 0 },
 
   rail: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: C.line },
   railInner: { padding: 8, gap: 6 },
