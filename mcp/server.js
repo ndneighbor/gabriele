@@ -132,4 +132,24 @@ app.post('/handoffs/:id/reply', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- notifications: passive feed. A Claude Code Stop hook POSTs every agent
+// response here (non-blocking), so the phone sees turns finish on ANY session. ----
+const NOTES_CAP = 50;
+const notifications = []; // [{ id, agent, text, cwd, at }]
+let noteSeq = 1;
+app.post('/notify', auth, (req, res) => {
+  const b = req.body || {};
+  const text = (b.text || '').toString().trim();
+  if (!text) return res.status(400).json({ error: 'empty text' });
+  const note = { id: String(noteSeq++), agent: (b.agent || 'agent').toString().slice(0, 60), text: text.slice(0, 4000), cwd: (b.cwd || '').toString(), at: Date.now() };
+  notifications.push(note);
+  if (notifications.length > NOTES_CAP) notifications.shift();
+  res.json({ ok: true, id: note.id });
+});
+app.get('/notifications', auth, (req, res) => {
+  const since = Number(req.query.since || 0);
+  const list = since ? notifications.filter((n) => Number(n.id) > since) : notifications.slice(-20);
+  res.json({ notifications: list });
+});
+
 app.listen(PORT, () => console.log(`[gabriele-mcp] listening on :${PORT} (token ${TOKEN === 'dev-secret' ? 'DEV' : 'set'})`));

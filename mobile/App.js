@@ -6,6 +6,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createRelay } from './src/relay';
 import { HandoffCard } from './src/HandoffCard';
+import { NotificationFeed } from './src/NotificationFeed';
 import { Term } from './src/term';
 
 const C = {
@@ -32,6 +33,7 @@ export default function App() {
   const [focusedId, setFocusedId] = useState(null);
   const [prompt, setPrompt] = useState('');
   const [handoffs, setHandoffs] = useState([]);
+  const [notes, setNotes] = useState([]);
   const [profiles, setProfiles] = useState([]);
   const [defaultProfile, setDefaultProfile] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -68,23 +70,34 @@ export default function App() {
     return () => relayRef.current && relayRef.current.disconnect();
   }, [cfg]);
 
-  // Poll the handoff bridge (separate MCP service) for pending agent → operator
-  // handoffs. Vibrate when a new one arrives — that's the "an agent needs you" buzz.
+  // Poll the MCP service: handoffs (active, needs you) + the notifications feed
+  // (passive, finished turns). Long buzz for a handoff, short tick for a turn.
   useEffect(() => {
-    if (!cfg?.mcp) { setHandoffs([]); return; }
+    if (!cfg?.mcp) { setHandoffs([]); setNotes([]); return; }
     const base = cfg.mcp.replace(/\/+$/, '');
-    let alive = true, primed = false;
+    let alive = true, primedH = false, primedN = false, lastNoteId = 0;
     const seen = new Set();
     async function poll() {
       try {
         const r = await fetch(`${base}/handoffs`, { headers: { authorization: `Bearer ${cfg.token}` } });
-        if (!alive || !r.ok) return;
-        const j = await r.json();
-        if (!alive) return;
-        const list = j.handoffs || [];
-        for (const h of list) if (!seen.has(h.id)) { seen.add(h.id); if (primed) Vibration.vibrate(400); }
-        primed = true;
-        setHandoffs(list);
+        if (alive && r.ok) {
+          const list = (await r.json()).handoffs || [];
+          for (const h of list) if (!seen.has(h.id)) { seen.add(h.id); if (primedH) Vibration.vibrate(400); }
+          primedH = true;
+          if (alive) setHandoffs(list);
+        }
+      } catch {}
+      try {
+        const r = await fetch(`${base}/notifications?since=${lastNoteId}`, { headers: { authorization: `Bearer ${cfg.token}` } });
+        if (alive && r.ok) {
+          const fresh = (await r.json()).notifications || [];
+          if (fresh.length) lastNoteId = Math.max(lastNoteId, ...fresh.map((n) => Number(n.id)));
+          if (primedN && fresh.length) {                              // first poll just seeds; later ones show
+            Vibration.vibrate(120);
+            if (alive) setNotes((prev) => [...[...fresh].reverse(), ...prev].slice(0, 12));
+          }
+          primedN = true;
+        }
       } catch {}
     }
     poll();
@@ -126,7 +139,7 @@ export default function App() {
   function forget() {
     AsyncStorage.removeItem('gab.token');
     if (relayRef.current) relayRef.current.disconnect();
-    setCfg(null); setConnected(false); setHostPresent(false); setChannels([]); setFocusedId(null); setHandoffs([]);
+    setCfg(null); setConnected(false); setHostPresent(false); setChannels([]); setFocusedId(null); setHandoffs([]); setNotes([]);
   }
 
   if (!loaded) {
@@ -200,6 +213,8 @@ export default function App() {
           <Text style={s.chipAddText}>+</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <NotificationFeed notes={notes} onClear={() => setNotes([])} />
 
       <View style={s.termWrap}><Term ref={termRef} onSize={onSize} /></View>
 
