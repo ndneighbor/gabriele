@@ -75,7 +75,10 @@ app.use(express.json({ limit: '1mb' }));
 
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
-  const tok = h.startsWith('Bearer ') ? h.slice(7) : (req.headers['x-gabriele-token'] || '');
+  // token from: Authorization header (CLI --header) | URL path :token (OAuth-only
+  // connector UIs that can't send a custom header, e.g. Claude Desktop) | x- header
+  const tok = h.startsWith('Bearer ') ? h.slice(7)
+    : (req.params.token || req.headers['x-gabriele-token'] || '');
   if (tok !== TOKEN) return res.status(401).json({ error: 'unauthorized' });
   next();
 }
@@ -85,7 +88,9 @@ app.get('/healthz', (_req, res) => res.json({ ok: true, pending: pending.size })
 // ---- MCP endpoint: stateful Streamable HTTP (session per initialize) ----
 const transports = {}; // sessionId -> transport
 
-app.post('/mcp', auth, async (req, res) => {
+// Mounted on BOTH /mcp (token via Authorization header → `claude mcp add --header`)
+// and /mcp/:token (token in the URL → OAuth-only connector UIs like Claude Desktop).
+async function mcpPost(req, res) {
   const sid = req.headers['mcp-session-id'];
   let transport = sid ? transports[sid] : undefined;
   if (!transport) {
@@ -101,7 +106,7 @@ app.post('/mcp', auth, async (req, res) => {
     await buildServer().connect(transport);
   }
   await transport.handleRequest(req, res, req.body);
-});
+}
 
 async function sessionReq(req, res) {
   const sid = req.headers['mcp-session-id'];
@@ -109,8 +114,10 @@ async function sessionReq(req, res) {
   if (!transport) return res.status(400).send('Invalid or missing session ID');
   await transport.handleRequest(req, res);
 }
-app.get('/mcp', auth, sessionReq);     // server->client SSE stream
-app.delete('/mcp', auth, sessionReq);  // session teardown
+
+app.post(['/mcp', '/mcp/:token'], auth, mcpPost);
+app.get(['/mcp', '/mcp/:token'], auth, sessionReq);     // server->client SSE stream
+app.delete(['/mcp', '/mcp/:token'], auth, sessionReq);  // session teardown
 
 // ---- operator REST API (the phone polls this) ----
 app.get('/handoffs', auth, (_req, res) => {

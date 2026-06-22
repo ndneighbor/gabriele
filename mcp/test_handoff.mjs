@@ -49,4 +49,14 @@ ok(text === 'yes — go', `handoff returned operator reply → “${text}”`);
 // auth check
 const un = await fetch(`${BASE}/handoffs`, { headers: { accept: 'application/json' } });
 ok(un.status === 401, `unauthorized request rejected (${un.status})`);
+
+// token-in-URL (for OAuth-only connector UIs): initialize via /mcp/<token>, NO auth header
+const initBody = (name) => JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize',
+  params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name, version: '1' } } });
+const noHdr = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+const pt = await (await fetch(`${BASE}/mcp/${TOKEN}`, { method: 'POST', headers: noHdr, body: initBody('connector') })).json();
+ok(pt.result?.serverInfo?.name === 'gabriele', `path-token /mcp/<token> initialize works headerless → ${pt.result?.serverInfo?.name}`);
+const badPt = await fetch(`${BASE}/mcp/wrong-token`, { method: 'POST', headers: noHdr, body: initBody('x') });
+ok(badPt.status === 401, `bad path token rejected (${badPt.status})`);
+
 console.log('\nALL GREEN');
