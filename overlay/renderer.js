@@ -133,8 +133,7 @@ function handle(msg) {
       sessions.clear();
       for (const m of msg.sessions) sessions.set(m.id, m);
       renderRail();
-      if (sessions.size === 0) newSession();                                   // bootstrap one
-      else if (!focusedId) focus([...sessions.keys()][0]);
+      if (sessions.size && !focusedId) focus([...sessions.keys()][0]);          // no auto-bootstrap (use + / ⌘T) — auto-new caused phantom storms
       break;
     case 'session': {
       const prev = sessions.get(msg.meta.id);

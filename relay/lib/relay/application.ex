@@ -9,8 +9,9 @@ defmodule Relay.Application do
 
     children = [
       {Phoenix.PubSub, name: Relay.PubSub},
-      # one host per room — registration dies with the socket process
-      {Registry, keys: :unique, name: Relay.Hosts},
+      # room_name -> Room pid; one Room GenServer per room holds authoritative state
+      {Registry, keys: :unique, name: Relay.Rooms},
+      {DynamicSupervisor, strategy: :one_for_one, name: Relay.RoomSup},
       {Bandit, plug: Relay.Router, scheme: :http, port: port}
     ]
 

@@ -1,24 +1,25 @@
 defmodule Relay.Socket do
   @moduledoc """
-  Protocol-dumb relay socket. Each connection sends a first `hello` message:
+  Relay socket. Each connection sends a first `hello`:
 
       {"type":"hello","role":"host"|"client","token":"<shared secret>"}
 
-  The token must equal GABRIELE_RELAY_SECRET. The room is derived from the token,
-  so the same secret = the same room. After auth the relay just pipes raw text:
-  host → all clients (PubSub fan-out), client → the host (Registry lookup). It
-  injects only `host_up` / `host_down` so clients know whether the Mac bridge is live.
+  The token must equal GABRIELE_RELAY_SECRET; the room = sha256(token). After auth
+  the socket is thin — it hands every frame to the room's `Relay.Room` GenServer,
+  which holds authoritative session state, fans host→clients out via PubSub, and
+  answers `sync`/`focus` from cache. Clients subscribe to `down:<room>` for fan-out;
+  the Room delivers everything (incl. unicast cache answers) as `{:relay, text}`.
+
+  Liveness: we ping every 30s and the socket's idle timeout (router.ex) reaps any
+  connection that stops pong-ing — so dead/half-open clients unsubscribe instead of
+  lingering as zombies (the orphaned-subscriber half of the phantom-channel bug).
   """
   @behaviour WebSock
-  require Logger
-  alias Phoenix.PubSub
-
-  @ping_ms 30_000
 
   @impl true
   def init(_opts) do
     schedule_ping()
-    {:ok, %{authed: false, role: nil, room: nil}}
+    {:ok, %{authed: false, role: nil, room: nil, missed: 0}}
   end
 
   # ---- before auth: only a valid hello gets through ----
@@ -35,39 +36,33 @@ defmodule Relay.Socket do
     end
   end
 
-  # ---- after auth: pipe by role ----
+  # ---- after auth: hand the frame to the room ----
   def handle_in({text, [opcode: :text]}, %{authed: true, role: "host", room: room} = state) do
-    PubSub.broadcast(Relay.PubSub, down(room), {:relay, text})
+    Relay.Room.host_frame(room, text)
     {:ok, state}
   end
 
   def handle_in({text, [opcode: :text]}, %{authed: true, role: "client", room: room} = state) do
-    case Registry.lookup(Relay.Hosts, room) do
-      [{host, _}] -> send(host, {:relay, text})
-      _ -> :ok
-    end
-
+    Relay.Room.client_frame(room, self(), text)
     {:ok, state}
   end
 
   def handle_in(_frame, state), do: {:ok, state}
 
   defp auth("host", room, state) do
-    case Registry.register(Relay.Hosts, room, nil) do
-      {:ok, _} ->
-        PubSub.broadcast(Relay.PubSub, down(room), {:relay, ~s({"type":"host_up"})})
-        Logger.info("host up #{String.slice(room, 0, 8)}")
+    case Relay.Room.attach_host(room, self()) do
+      :ok ->
         {:push, {:text, ~s({"type":"hello_ok","role":"host"})},
          %{state | authed: true, role: "host", room: room}}
 
-      {:error, _} ->
-        {:stop, :normal, state}
+      {:error, :busy} ->
+        {:stop, :normal, state}                              # one host per room
     end
   end
 
   defp auth("client", room, state) do
-    PubSub.subscribe(Relay.PubSub, down(room))
-    present = match?([_ | _], Registry.lookup(Relay.Hosts, room))
+    Phoenix.PubSub.subscribe(Relay.PubSub, "down:" <> room)
+    {:ok, present} = Relay.Room.attach_client(room, self())
 
     {:push, {:text, ~s({"type":"hello_ok","role":"client","host_present":#{present}})},
      %{state | authed: true, role: "client", room: room}}
@@ -75,26 +70,32 @@ defmodule Relay.Socket do
 
   defp auth(_role, _room, state), do: {:stop, :normal, state}
 
-  # ---- mailbox ----
+  # ---- liveness: pong resets the miss counter; 2 misses in a row => reap ----
+  @impl true
+  def handle_control({_data, [opcode: :pong]}, state), do: {:ok, %{state | missed: 0}}
+  def handle_control(_frame, state), do: {:ok, state}
+
+  # ---- mailbox: the Room (and PubSub) deliver frames as {:relay, text} ----
   @impl true
   def handle_info({:relay, text}, state), do: {:push, {:text, text}, state}
 
+  def handle_info(:ping, %{missed: missed} = state) when missed >= 2 do
+    {:stop, :normal, state}                                  # client stopped pong-ing — reap the zombie
+  end
+
   def handle_info(:ping, state) do
     schedule_ping()
-    {:push, {:ping, ""}, state}
+    {:push, {:ping, ""}, %{state | missed: state.missed + 1}}
   end
 
   def handle_info(_msg, state), do: {:ok, state}
 
+  # The Room monitors host/client pids, so it learns of disconnects on its own;
+  # no terminate broadcast needed here.
   @impl true
-  def terminate(_reason, %{role: "host", room: room}) when is_binary(room) do
-    PubSub.broadcast(Relay.PubSub, down(room), {:relay, ~s({"type":"host_down"})})
-    :ok
-  end
-
   def terminate(_reason, _state), do: :ok
 
-  defp schedule_ping, do: Process.send_after(self(), :ping, @ping_ms)
+  defp schedule_ping, do: Process.send_after(self(), :ping, ping_ms())
+  defp ping_ms, do: String.to_integer(System.get_env("GABRIELE_PING_MS") || "30000")
   defp room_for(token), do: Base.encode16(:crypto.hash(:sha256, token), case: :lower)
-  defp down(room), do: "down:" <> room
 end
