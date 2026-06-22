@@ -7,6 +7,8 @@ export function createRelay({ url, token, on = {} }) {
   let ready = false;
   let focusedId = null;
   let sessions = new Map(); // id -> meta
+  let profiles = [];        // [{id,label}] advertised by the bridge
+  let defaultProfile = null;
 
   const ordered = () => [...sessions.values()].sort((a, b) => a.startedAt - b.startedAt);
   const emitChannels = () => on.channels && on.channels(ordered(), focusedId);
@@ -40,6 +42,11 @@ export function createRelay({ url, token, on = {} }) {
         break;
       case 'sessions':
         sessions = new Map(m.sessions.map((s) => [s.id, s]));
+        if (m.profiles) {
+          profiles = m.profiles;
+          defaultProfile = m.defaultProfile || (m.profiles[0] && m.profiles[0].id) || null;
+          on.profiles && on.profiles(profiles, defaultProfile);
+        }
         if (!focusedId && m.sessions[0]) focus(m.sessions[0].id);
         emitChannels();
         break;
@@ -68,13 +75,15 @@ export function createRelay({ url, token, on = {} }) {
   function focus(id) { focusedId = id; send({ type: 'focus', id }); emitChannels(); }
   function input(data) { if (focusedId) send({ type: 'input', id: focusedId, data }); }
   function resize(cols, rows) { if (focusedId) send({ type: 'resize', id: focusedId, cols, rows }); }
-  function newSession(cols = 80, rows = 24) { send({ type: 'new', cols, rows }); }
+  function newSession(cols = 80, rows = 24, profile) { send({ type: 'new', cols, rows, profile }); }
   function close(id) { send({ type: 'close', id }); }
 
   connect();
   return {
     focus, input, resize, newSession, close, send, ordered,
     get focusedId() { return focusedId; },
+    get profiles() { return profiles; },
+    get defaultProfile() { return defaultProfile; },
     disconnect() { try { ws && ws.close(); } catch {} },
   };
 }

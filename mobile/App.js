@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet,
-  StatusBar, KeyboardAvoidingView, Platform, ActivityIndicator, Vibration,
+  StatusBar, KeyboardAvoidingView, Platform, ActivityIndicator, Vibration, Modal,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createRelay } from './src/relay';
@@ -32,6 +32,9 @@ export default function App() {
   const [focusedId, setFocusedId] = useState(null);
   const [prompt, setPrompt] = useState('');
   const [handoffs, setHandoffs] = useState([]);
+  const [profiles, setProfiles] = useState([]);
+  const [defaultProfile, setDefaultProfile] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const relayRef = useRef(null);
   const termRef = useRef(null);
@@ -59,6 +62,7 @@ export default function App() {
         channels: (list, fid) => { setChannels(list); setFocusedId(fid); },
         data: (id, d) => termRef.current && termRef.current.write(d),
         snapshot: (id, d) => termRef.current && termRef.current.reset(d),
+        profiles: (list, def) => { setProfiles(list); setDefaultProfile(def); },
       },
     });
     return () => relayRef.current && relayRef.current.disconnect();
@@ -110,6 +114,8 @@ export default function App() {
 
   const sendKey = (seq) => relayRef.current && relayRef.current.input(seq);
   const sendPrompt = () => { if (prompt.trim() && relayRef.current) { relayRef.current.input(prompt + '\r'); setPrompt(''); } };
+  const addChannel = (profile) => { setPickerOpen(false); relayRef.current && relayRef.current.newSession(termSize.current.cols, termSize.current.rows, profile || defaultProfile); };
+  const onPlus = () => (profiles.length > 1 ? setPickerOpen(true) : addChannel(defaultProfile)); // pick a login if there's more than one
 
   function saveAndConnect() {
     const url = urlInput.trim(), token = tokenInput.trim(), mcp = mcpInput.trim();
@@ -184,10 +190,13 @@ export default function App() {
               <View style={[s.dot, { backgroundColor: dot }]} />
               <Text style={[s.chipCh, active && s.chipChActive]}>CH-{i + 1}</Text>
               <Text style={[s.chipLabel, active && s.chipLabelActive]}>{label.toUpperCase()}</Text>
+              {profiles.length > 1 && !!c.profile && (
+                <Text style={[s.chipProfile, active && s.chipLabelActive]}>{String(c.profile).toUpperCase()}</Text>
+              )}
             </TouchableOpacity>
           );
         })}
-        <TouchableOpacity style={[s.chip, s.chipAdd]} onPress={() => relayRef.current.newSession(termSize.current.cols, termSize.current.rows)}>
+        <TouchableOpacity style={[s.chip, s.chipAdd]} onPress={onPlus}>
           <Text style={s.chipAddText}>+</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -211,6 +220,20 @@ export default function App() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
+        <TouchableOpacity style={s.modalBg} activeOpacity={1} onPress={() => setPickerOpen(false)}>
+          <View style={s.picker}>
+            <Text style={s.pickerTitle}>NEW CHANNEL · PROFILE</Text>
+            {profiles.map((p) => (
+              <TouchableOpacity key={p.id} style={s.pickerRow} onPress={() => addChannel(p.id)}>
+                <Text style={s.pickerLabel}>{p.label}</Text>
+                {p.id === defaultProfile && <Text style={s.pickerDefault}>DEFAULT</Text>}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -241,8 +264,16 @@ const s = StyleSheet.create({
   chipChActive: { color: C.ink },
   chipLabel: { color: C.dim, letterSpacing: 1, fontSize: 10, fontFamily: MONO },
   chipLabelActive: { color: C.ink },
+  chipProfile: { color: C.lime, letterSpacing: 1, fontSize: 9, fontFamily: MONO, borderLeftWidth: 1, borderLeftColor: C.line2, paddingLeft: 7 },
   chipAdd: { paddingHorizontal: 13 },
   chipAddText: { color: C.dim, fontWeight: '700', fontSize: 16 },
+
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 28 },
+  picker: { backgroundColor: C.panel, borderWidth: 1, borderColor: C.line2 },
+  pickerTitle: { color: C.dim, letterSpacing: 2, fontSize: 11, fontFamily: MONO, padding: 14, borderBottomWidth: 1, borderBottomColor: C.line },
+  pickerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: C.line },
+  pickerLabel: { color: C.text, fontSize: 14, fontFamily: MONO },
+  pickerDefault: { color: C.lime, letterSpacing: 1.5, fontSize: 9, fontFamily: MONO },
 
   termWrap: { flex: 1, backgroundColor: C.bg },
 
