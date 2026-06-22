@@ -1,0 +1,7 @@
+{
+  "default": "work",
+  "profiles": [
+    { "id": "work", "label": "Work · Railway", "configDir": null },
+    { "id": "personal", "label": "Personal", "configDir": "~/.claude-personal" }
+  ]
+}

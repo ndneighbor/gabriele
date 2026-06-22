@@ -5,6 +5,9 @@
 // Both sinks share one broadcast path; inbound messages share one handler.
 
 const pty = require('node-pty');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = Number(process.env.GABRIELE_PORT || 4848);
@@ -16,6 +19,23 @@ const TOKEN = process.env.GABRIELE_TOKEN || '';
 const BUFFER_CAP = 200 * 1024; // per-session scrollback kept for replay
 const IDLE_MS = 2000;          // no output this long => "idle" (turn done / awaiting you)
 
+// Profiles = which login a channel runs under. Each maps to its own
+// CLAUDE_CONFIG_DIR (separate account/auth), so personal vs work never mix.
+// configDir null = the standard ~/.claude. Edit bridge/profiles.json to taste.
+function loadProfiles() {
+  const builtin = [{ id: 'default', label: 'Default', configDir: null }];
+  const file = process.env.GABRIELE_PROFILES || path.join(__dirname, 'profiles.json');
+  try {
+    const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const list = Array.isArray(cfg.profiles) && cfg.profiles.length ? cfg.profiles : builtin;
+    return { list, def: cfg.default || list[0].id };
+  } catch { return { list: builtin, def: 'default' }; }
+}
+const { list: PROFILES, def: DEFAULT_PROFILE } = loadProfiles();
+const profileById = (id) => PROFILES.find((p) => p.id === id);
+const expandHome = (p) => (p && p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
+console.log(`[gabriele] profiles: ${PROFILES.map((p) => p.id).join(', ')} (default ${DEFAULT_PROFILE})`);
+
 // id -> { id, title, cwd, cmd, state, startedAt, pty, buffer, idleTimer }
 const sessions = new Map();
 let nextId = 1;
@@ -26,8 +46,9 @@ let relayAuthed = false;
 const wss = new WebSocketServer({ host: '0.0.0.0', port: PORT });
 console.log(`[gabriele] bridge listening on ws://0.0.0.0:${PORT}`);
 
-const meta = (s) => ({ id: s.id, title: s.title, cwd: s.cwd, cmd: s.cmd, state: s.state, startedAt: s.startedAt });
-const sessionsSnapshot = () => ({ type: 'sessions', sessions: [...sessions.values()].map(meta) });
+const meta = (s) => ({ id: s.id, title: s.title, cwd: s.cwd, cmd: s.cmd, state: s.state, startedAt: s.startedAt, profile: s.profile, profileLabel: s.profileLabel });
+const profilesList = () => PROFILES.map((p) => ({ id: p.id, label: p.label }));
+const sessionsSnapshot = () => ({ type: 'sessions', sessions: [...sessions.values()].map(meta), profiles: profilesList(), defaultProfile: DEFAULT_PROFILE });
 
 function broadcast(msg) {
   const data = JSON.stringify(msg);
@@ -41,7 +62,7 @@ function setState(s, state) {
   broadcast({ type: 'session', meta: meta(s) });
 }
 
-function createSession({ cmd, args, cwd, title, cols, rows } = {}) {
+function createSession({ cmd, args, cwd, title, cols, rows, profile } = {}) {
   cmd = cmd || DEFAULT_CMD;
   cwd = cwd || DEFAULT_CWD;
   args = args || [];
@@ -51,17 +72,25 @@ function createSession({ cmd, args, cwd, title, cols, rows } = {}) {
     args = ['--dangerously-skip-permissions', ...args];
   }
 
+  // run this channel under its profile's login (own CLAUDE_CONFIG_DIR)
+  const prof = profileById(profile) || profileById(DEFAULT_PROFILE) || PROFILES[0];
+  const env = { ...process.env, TERM: 'xterm-256color' };
+  if (prof && prof.configDir) env.CLAUDE_CONFIG_DIR = expandHome(prof.configDir);
+  else delete env.CLAUDE_CONFIG_DIR; // "default" profile = the standard ~/.claude, regardless of how the bridge was launched
+
   const term = pty.spawn(cmd, args, {
     name: 'xterm-256color',
     cols: cols || 80, rows: rows || 24,
     cwd,
-    env: { ...process.env, TERM: 'xterm-256color' },
+    env,
   });
 
   const s = {
     id: String(nextId++),
     title: title || `${cmd.split('/').pop()} · ${cwd.split('/').pop()}`,
     cwd, cmd,
+    profile: prof ? prof.id : null,
+    profileLabel: prof ? prof.label : null,
     state: 'running',
     startedAt: Date.now(),
     pty: term,
@@ -89,7 +118,7 @@ function createSession({ cmd, args, cwd, title, cols, rows } = {}) {
   });
 
   broadcast({ type: 'session', meta: meta(s) });
-  console.log(`[gabriele] session ${s.id}: ${cmd} @ ${cwd}`);
+  console.log(`[gabriele] session ${s.id}: ${cmd} @ ${cwd} [${prof ? prof.id : 'default'}]`);
   return s;
 }
 
