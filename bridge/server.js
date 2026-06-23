@@ -237,7 +237,8 @@ function handleMessage(m) {
 }
 
 // ---- local LAN clients ----
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  try { req.socket.setNoDelay(true); } catch {} // LAN-direct: no Nagle either
   ws.send(JSON.stringify(sessionsSnapshot()));
   ws.on('message', (raw) => {
     let m; try { m = JSON.parse(raw.toString()); } catch { return; }
@@ -251,7 +252,10 @@ function connectRelay() {
   if (!RELAY_URL) return;
   relayAuthed = false;
   relay = new WebSocket(RELAY_URL);
-  relay.on('open', () => relay.send(JSON.stringify({ type: 'hello', role: 'host', token: TOKEN })));
+  relay.on('open', () => {
+    try { relay._socket && relay._socket.setNoDelay(true); } catch {} // no Nagle on the relay hop — keystrokes ship immediately
+    relay.send(JSON.stringify({ type: 'hello', role: 'host', token: TOKEN }));
+  });
   relay.on('message', (raw) => {
     let m; try { m = JSON.parse(raw.toString()); } catch { return; }
     if (!relayAuthed) {

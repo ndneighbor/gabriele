@@ -12,7 +12,8 @@ defmodule Relay.Application do
       # room_name -> Room pid; one Room GenServer per room holds authoritative state
       {Registry, keys: :unique, name: Relay.Rooms},
       {DynamicSupervisor, strategy: :one_for_one, name: Relay.RoomSup},
-      {Bandit, plug: Relay.Router, scheme: :http, port: port}
+      {Bandit, plug: Relay.Router, scheme: :http, port: port,
+       thousand_island_options: [transport_options: [nodelay: true]]}
     ]
 
     Logger.info("gabriele relay listening on :#{port}")
