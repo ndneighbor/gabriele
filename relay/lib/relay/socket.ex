@@ -28,9 +28,8 @@ defmodule Relay.Socket do
     secret = System.get_env("GABRIELE_RELAY_SECRET")
 
     with {:ok, %{"type" => "hello", "token" => token} = msg} <- Jason.decode(text),
-         true <- is_binary(secret) and secret != "",
-         true <- token == secret do
-      auth(msg["role"], room_for(token), state)
+         {:ok, role, room} <- verify(token, msg["role"], secret) do
+      auth(role, room, state)
     else
       _ -> {:stop, :normal, state}
     end
@@ -42,7 +41,7 @@ defmodule Relay.Socket do
     {:ok, state}
   end
 
-  def handle_in({text, [opcode: :text]}, %{authed: true, role: "client", room: room} = state) do
+  def handle_in({text, [opcode: :text]}, %{authed: true, role: role, room: room} = state) when role in ["control", "view"] do
     Relay.Room.client_frame(room, self(), text)
     {:ok, state}
   end
@@ -60,15 +59,47 @@ defmodule Relay.Socket do
     end
   end
 
-  defp auth("client", room, state) do
+  defp auth(role, room, state) when role in ["control", "view"] do
     Phoenix.PubSub.subscribe(Relay.PubSub, "down:" <> room)
-    {:ok, present} = Relay.Room.attach_client(room, self())
+    {:ok, present} = Relay.Room.attach_client(room, self(), role)
 
-    {:push, {:text, ~s({"type":"hello_ok","role":"client","host_present":#{present}})},
-     %{state | authed: true, role: "client", room: room}}
+    {:push, {:text, ~s({"type":"hello_ok","role":"#{role}","host_present":#{present}})},
+     %{state | authed: true, role: role, room: room}}
   end
 
   defp auth(_role, _room, state), do: {:stop, :normal, state}
+
+  # Auth: the raw secret (legacy — role from hello: host, else control) OR a signed
+  # per-device token "<payload-b64url>.<hmac-b64url>" carrying {role, device}.
+  defp verify(token, hello_role, secret) when is_binary(token) and is_binary(secret) and secret != "" do
+    if Plug.Crypto.secure_compare(token, secret) do
+      {:ok, if(hello_role == "host", do: "host", else: "control"), room_for(secret)}
+    else
+      verify_signed(token, secret)
+    end
+  end
+
+  defp verify(_token, _role, _secret), do: :error
+
+  defp verify_signed(token, secret) do
+    with [payload, sig] <- String.split(token, ".", parts: 2),
+         expected <- Base.url_encode64(:crypto.mac(:hmac, :sha256, secret, payload), padding: false),
+         true <- Plug.Crypto.secure_compare(expected, sig),
+         {:ok, json} <- Base.url_decode64(payload, padding: false),
+         {:ok, %{"role" => role, "device" => device}} <- Jason.decode(json),
+         true <- role in ["host", "control", "view"],
+         false <- revoked?(device) do
+      {:ok, role, room_for(secret)}
+    else
+      _ -> :error
+    end
+  end
+
+  defp revoked?(device) do
+    (System.get_env("GABRIELE_REVOKED") || "")
+    |> String.split(",", trim: true)
+    |> Enum.any?(&(String.trim(&1) == device))
+  end
 
   # ---- liveness: pong resets the miss counter; 2 misses in a row => reap ----
   @impl true

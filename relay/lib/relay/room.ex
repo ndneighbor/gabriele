@@ -40,7 +40,7 @@ defmodule Relay.Room do
   end
 
   def attach_host(room, pid), do: GenServer.call(ensure(room), {:attach_host, pid})
-  def attach_client(room, pid), do: GenServer.call(ensure(room), {:attach_client, pid})
+  def attach_client(room, pid, role), do: GenServer.call(ensure(room), {:attach_client, pid, role})
   def host_frame(room, text), do: GenServer.cast(ensure(room), {:host_frame, text})
   def client_frame(room, from, text), do: GenServer.cast(ensure(room), {:client_frame, from, text})
 
@@ -66,9 +66,9 @@ defmodule Relay.Room do
     end
   end
 
-  def handle_call({:attach_client, pid}, _from, state) do
+  def handle_call({:attach_client, pid, role}, _from, state) do
     Process.monitor(pid)
-    state = cancel_evict(%{state | clients: Map.put(state.clients, pid, true)})
+    state = cancel_evict(%{state | clients: Map.put(state.clients, pid, role)})
     send(pid, {:relay, sessions_json(state)})                # full state immediately, from cache
     {:reply, {:ok, state.host != nil}, state}
   end
@@ -83,25 +83,26 @@ defmodule Relay.Room do
 
   # ---- client frames: answer from cache or route to the host ----
   def handle_cast({:client_frame, from, text}, state) do
+    role = Map.get(state.clients, from, "view")              # control = drive · view = read-only
     case Jason.decode(text) do
       {:ok, %{"type" => "sync"}} ->
         send(from, {:relay, sessions_json(state)})
 
       {:ok, %{"type" => "focus", "id" => id}} ->
         case Map.get(state.buffers, id) do
-          nil -> to_host(state, text)                         # no cached scrollback yet — let the host supply it
-          buf -> send(from, {:relay, snapshot_json(id, buf)})
+          buf when is_binary(buf) -> send(from, {:relay, snapshot_json(id, buf)})   # cached scrollback = read-only, any role
+          _ -> if role == "control", do: to_host(state, text)                       # cache miss -> ask the host (control only)
         end
 
       {:ok, %{"type" => "new"}} ->
-        # the phantom fix: only spawn when a real host is present and we're under cap
-        if state.host && map_size(state.sessions) < @max_sessions, do: to_host(state, text)
+        # phantom fix + role gate: only a control client, with a host present, under cap
+        if role == "control" and is_pid(state.host) and map_size(state.sessions) < @max_sessions, do: to_host(state, text)
 
-      {:ok, _} ->
-        to_host(state, text)                                 # input/resize/kill/close/etc
+      {:ok, %{"type" => type}} when type in ["input", "resize", "kill", "close"] ->
+        if role == "control", do: to_host(state, text)       # view clients cannot drive sessions
 
       _ ->
-        :ok
+        :ok                                                  # unknown frames are never forwarded to the host
     end
 
     {:noreply, state}
