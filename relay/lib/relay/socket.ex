@@ -128,6 +128,7 @@ defmodule Relay.Socket do
     end
   end
 
+  def handle_info(:evicted, state), do: {:stop, :normal, state}   # a newer host took the slot — close this half-open one
   def handle_info(_msg, state), do: {:ok, state}
 
   # The Room monitors host/client pids, so it learns of disconnects on its own;

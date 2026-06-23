@@ -68,7 +68,7 @@ export default function App() {
         status: (conn, host) => { setConnected(conn); setHostPresent(host); },
         channels: (list, fid) => { setChannels(list); setFocusedId(fid); },
         data: (id, d) => termRef.current && termRef.current.write(d),
-        snapshot: (id, d) => termRef.current && termRef.current.reset(d),
+        snapshot: (id, d) => termRef.current && termRef.current.write(d), // frame self-clears (ESC[2J/3J/H); write not reset => no parser reset can drop a split escape
         profiles: (list, def) => { setProfiles(list); setDefaultProfile(def); },
         latency: (ms) => setLatency(ms),
       },

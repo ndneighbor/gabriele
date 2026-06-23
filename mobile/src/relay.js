@@ -11,6 +11,7 @@ export function createRelay({ url, token, on = {} }) {
   let defaultProfile = null;
   const direct = !token;    // no token => talk straight to the bridge's LAN server (no relay, no detour)
   let pingTimer = null;
+  let wasDown = false;      // set on a real socket drop, so we repaint only on genuine reconnect (not every sessions frame)
 
   const ordered = () => [...sessions.values()].sort((a, b) => a.startedAt - b.startedAt);
   const emitChannels = () => on.channels && on.channels(ordered(), focusedId);
@@ -31,7 +32,7 @@ export function createRelay({ url, token, on = {} }) {
       if (direct) { ready = true; on.status && on.status(true, true); send({ type: 'sync' }); startProbe(); } // LAN: the bridge is right here
       else ws.send(JSON.stringify({ type: 'hello', role: 'client', token }));
     };
-    ws.onclose = () => { ready = false; clearInterval(pingTimer); on.status && on.status(false, false); setTimeout(connect, 1500); };
+    ws.onclose = () => { ready = false; wasDown = true; clearInterval(pingTimer); on.status && on.status(false, false); setTimeout(connect, 1500); };
     ws.onerror = () => { try { ws.close(); } catch {} };
     ws.onmessage = (e) => handle(JSON.parse(e.data));
   }
@@ -61,10 +62,11 @@ export function createRelay({ url, token, on = {} }) {
           defaultProfile = m.defaultProfile || (m.profiles[0] && m.profiles[0].id) || null;
           on.profiles && on.profiles(profiles, defaultProfile);
         }
-        // reconnect (relay redeploy / socket drop) re-sends `sessions`: re-focus the live
-        // channel to pull a fresh snapshot, else the terminal shows stale pre-drop content.
-        if (focusedId && sessions.has(focusedId)) focus(focusedId);
+        // Repaint ONLY after a genuine reconnect (wasDown), not on every sessions frame —
+        // otherwise a flapping link triggers a reset storm mid-stream (the garble).
+        if (focusedId && sessions.has(focusedId)) { if (wasDown) focus(focusedId); }
         else if (m.sessions[0]) focus(m.sessions[0].id);
+        wasDown = false;
         emitChannels();
         break;
       case 'session': {

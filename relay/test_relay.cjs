@@ -76,10 +76,12 @@ function hostSim(initial = []) {
   const after = c1.last('sessions');
   ok(after && after.sessions.length === 0, 'E: stale session cleared after fresh host snapshot (no dead-PTY ghosts)');
 
-  // F — one host per room
+  // F — last-host-wins: a replacement host TAKES OVER (evicts the old) instead of being
+  // rejected as :busy, so a reconnecting bridge never flap-storms on a half-open predecessor.
   const h3 = conn('host');
   await h3.ready; await sleep(300);
-  ok(h3.closed && !h3.has('hello_ok'), 'F: a second host in the room is rejected');
+  ok(h3.has('hello_ok'), 'F: a replacement host takes over the room (last-host-wins)');
+  ok(h2.closed, 'F: the evicted previous host was closed');
 
   // G — reaper: a client that stops pong-ing is reaped (~3s at PING_MS=1000)
   const z = conn('client', { autoPong: false });

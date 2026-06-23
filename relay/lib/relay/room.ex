@@ -54,16 +54,17 @@ defmodule Relay.Room do
   # ---- attach / presence ----
   @impl true
   def handle_call({:attach_host, pid}, _from, %{host: host} = state) do
-    if is_pid(host) and Process.alive?(host) do
-      {:reply, {:error, :busy}, state}                       # one host per room
-    else
-      Process.monitor(pid)
-      state = cancel_evict(%{state | host: pid})
-      send(pid, {:relay, ~s({"type":"sync"})})               # refresh cache from the host's truth
-      PubSub.broadcast(Relay.PubSub, down(state.room), {:relay, ~s({"type":"host_up"})})
-      Logger.info("host up #{slug(state.room)}")
-      {:reply, :ok, state}
-    end
+    # last-host-wins: a reconnecting bridge's predecessor is usually a HALF-OPEN zombie still
+    # holding the slot (common through a VPN/proxy). Rejecting the newcomer as :busy made it
+    # retry-flap until the zombie was reaped (~a minute), and every reconnect storm reset/garbled
+    # attached clients. So evict the old socket and let the newest connection take over.
+    if is_pid(host) and host != pid and Process.alive?(host), do: send(host, :evicted)
+    Process.monitor(pid)
+    state = cancel_evict(%{state | host: pid})
+    send(pid, {:relay, ~s({"type":"sync"})})                 # refresh cache from the new host's truth
+    PubSub.broadcast(Relay.PubSub, down(state.room), {:relay, ~s({"type":"host_up"})})
+    Logger.info("host up #{slug(state.room)}")
+    {:reply, :ok, state}
   end
 
   def handle_call({:attach_client, pid, role}, _from, state) do
