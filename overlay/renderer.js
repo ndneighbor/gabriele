@@ -158,7 +158,8 @@ function handle(msg) {
       sessions.clear();
       for (const m of msg.sessions) sessions.set(m.id, m);
       renderRail();
-      if (sessions.size && !focusedId) focus([...sessions.keys()][0]);          // no auto-bootstrap (use + / ⌘T) — auto-new caused phantom storms
+      if (focusedId && sessions.has(focusedId)) focus(focusedId);               // reconnect: re-pull a fresh snapshot (else stale pre-drop screen)
+      else if (sessions.size) focus([...sessions.keys()][0]);                   // first connect — no auto-NEW (that caused phantom storms)
       break;
     case 'session': {
       const prev = sessions.get(msg.meta.id);
@@ -279,7 +280,7 @@ function renderStatus() {
   if (c.running) parts.push(`<b class="s-run">${c.running} RUN</b>`);
   if (c.idle) parts.push(`<b class="s-idle">${c.idle} IDLE</b>`);
   if (c.error) parts.push(`<b class="s-err">${c.error} ERR</b>`);
-  statusEl.innerHTML = parts.join('&nbsp;·&nbsp;') || 'NO CHANNELS';
+  statusEl.innerHTML = parts.join('&nbsp;·&nbsp;') || (sessions.size ? `${sessions.size} CH` : 'NO CHANNELS');
 }
 
 const NOTIFY_COOLDOWN_MS = 10000;

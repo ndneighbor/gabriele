@@ -61,7 +61,10 @@ export function createRelay({ url, token, on = {} }) {
           defaultProfile = m.defaultProfile || (m.profiles[0] && m.profiles[0].id) || null;
           on.profiles && on.profiles(profiles, defaultProfile);
         }
-        if (!focusedId && m.sessions[0]) focus(m.sessions[0].id);
+        // reconnect (relay redeploy / socket drop) re-sends `sessions`: re-focus the live
+        // channel to pull a fresh snapshot, else the terminal shows stale pre-drop content.
+        if (focusedId && sessions.has(focusedId)) focus(focusedId);
+        else if (m.sessions[0]) focus(m.sessions[0].id);
         emitChannels();
         break;
       case 'session': {

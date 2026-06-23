@@ -202,7 +202,9 @@ export default function App() {
   // ---- main screen ----
   const counts = channels.reduce((a, c) => ((a[c.state] = (a[c.state] || 0) + 1), a), {});
   const status = !connected ? 'RELAY OFFLINE' : !hostPresent ? 'BRIDGE OFFLINE'
-    : [counts.running && `${counts.running} RUN`, counts.idle && `${counts.idle} IDLE`].filter(Boolean).join(' · ') || 'NO CHANNELS';
+    : [counts.running && `${counts.running} RUN`, counts.idle && `${counts.idle} IDLE`].filter(Boolean).join(' · ')
+      // never claim "NO CHANNELS" while a chip renders: a re-synced channel whose state isn't exactly running/idle still counts
+      || (channels.length ? `${channels.length} CH` : 'NO CHANNELS');
   const statusColor = (!connected || !hostPresent) ? C.red : C.dim;
 
   return (
@@ -238,7 +240,11 @@ export default function App() {
           const label = (c.cmd || '').split('/').pop().split(' ')[0] || 'sh';
           return (
             <TouchableOpacity key={c.id}
-              onPress={() => { relayRef.current.focus(c.id); relayRef.current.resize(termSize.current.cols, termSize.current.rows); }}
+              onPress={() => {
+                if (c.id !== focusedId) termRef.current && termRef.current.reset(''); // blank on switch so the old channel + its stale-size frame never linger
+                relayRef.current.focus(c.id);                                          // re-focus (also = manual repaint when tapping the active chip)
+                relayRef.current.resize(termSize.current.cols, termSize.current.rows);
+              }}
               style={[s.chip, active && s.chipActive]}>
               <View style={[s.dot, { backgroundColor: dot }]} />
               <Text style={[s.chipCh, active && s.chipChActive]}>CH-{i + 1}</Text>

@@ -74,7 +74,7 @@ defmodule Relay.Room do
   end
 
   def handle_call(:stats, _from, state) do
-    bytes = state.buffers |> Map.values() |> Enum.reduce(0, &(byte_size(&1) + &2))
+    bytes = state.buffers |> Map.values() |> Enum.reduce(0, fn %{snap: s, deltas: dl}, acc -> byte_size(s) + byte_size(dl) + acc end)
     {:reply, %{host: state.host != nil, clients: map_size(state.clients),
                sessions: map_size(state.sessions), buffer_kb: div(bytes, 1024)}, state}
   end
@@ -109,8 +109,8 @@ defmodule Relay.Room do
 
       {:ok, %{"type" => "focus", "id" => id}} ->
         case Map.get(state.buffers, id) do
-          buf when is_binary(buf) -> send(from, {:relay, snapshot_json(id, buf)})   # cached scrollback = read-only, any role
-          _ -> if role == "control", do: to_host(state, text)                       # cache miss -> ask the host (control only)
+          %{snap: snap, deltas: deltas} -> send(from, {:relay, snapshot_json(id, snap <> deltas)})  # coherent frame + faithful tail
+          _ -> if role == "control", do: to_host(state, text)                                       # cache miss -> ask the host (control only)
         end
 
       {:ok, %{"type" => "new"}} ->
@@ -178,11 +178,25 @@ defmodule Relay.Room do
     end
   end
 
-  defp apply_host(state, {:ok, %{"type" => "data", "id" => id, "data" => d}}) when is_binary(d),
-    do: %{state | buffers: Map.update(state.buffers, id, cap(d), &cap(&1 <> d))}
+  # focus-replay cache per session = %{snap: <serialized full frame>, deltas: <faithful continuation>}.
+  # The snapshot is replay-authoritative; the deltas are a byte-exact continuation of it. NEVER head-chop
+  # the concatenation (that eats the frame's reset prefix and splits an escape) — when it would exceed the
+  # cap, shed the deltas instead (the snapshot alone is a coherent frame; the bridge re-seeds on settle).
+  # Before the first snapshot we keep a raw tail so an early focus still replays something.
+  defp apply_host(state, {:ok, %{"type" => "data", "id" => id, "data" => d}}) when is_binary(d) do
+    %{snap: snap, deltas: deltas} = Map.get(state.buffers, id, %{snap: "", deltas: ""})
+    deltas = deltas <> d
+    deltas =
+      cond do
+        byte_size(snap) + byte_size(deltas) <= @buf_cap -> deltas
+        snap != "" -> ""
+        true -> cap(deltas)
+      end
+    %{state | buffers: Map.put(state.buffers, id, %{snap: snap, deltas: deltas})}
+  end
 
   defp apply_host(state, {:ok, %{"type" => "snapshot", "id" => id, "data" => d}}) when is_binary(d),
-    do: %{state | buffers: Map.put(state.buffers, id, cap(d))}
+    do: %{state | buffers: Map.put(state.buffers, id, %{snap: d, deltas: ""})}
 
   defp apply_host(state, _), do: state
 
