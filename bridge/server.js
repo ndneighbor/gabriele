@@ -207,6 +207,7 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify(sessionsSnapshot()));
   ws.on('message', (raw) => {
     let m; try { m = JSON.parse(raw.toString()); } catch { return; }
+    if (m.type === 'ping') { try { ws.send(JSON.stringify({ type: 'pong', t: m.t })); } catch {} return; } // latency probe
     handleMessage(m);
   });
 });

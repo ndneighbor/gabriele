@@ -30,6 +30,7 @@ export default function App() {
   const [mcpInput, setMcpInput] = useState(DEFAULT_MCP);
   const [connected, setConnected] = useState(false);
   const [hostPresent, setHostPresent] = useState(false);
+  const [latency, setLatency] = useState(null);
   const [channels, setChannels] = useState([]);
   const [focusedId, setFocusedId] = useState(null);
   const [prompt, setPrompt] = useState('');
@@ -69,6 +70,7 @@ export default function App() {
         data: (id, d) => termRef.current && termRef.current.write(d),
         snapshot: (id, d) => termRef.current && termRef.current.reset(d),
         profiles: (list, def) => { setProfiles(list); setDefaultProfile(def); },
+        latency: (ms) => setLatency(ms),
       },
     });
     return () => relayRef.current && relayRef.current.disconnect();
@@ -157,7 +159,7 @@ export default function App() {
 
   function saveAndConnect() {
     const url = urlInput.trim(), token = tokenInput.trim(), mcp = mcpInput.trim();
-    if (!url || !token) return;
+    if (!url) return; // token optional — blank = direct LAN (no relay, no auth)
     AsyncStorage.setItem('gab.url', url); AsyncStorage.setItem('gab.token', token); AsyncStorage.setItem('gab.mcp', mcp);
     setCfg({ url, token, mcp });
   }
@@ -185,6 +187,7 @@ export default function App() {
           <Text style={s.fieldLabel}>TOKEN</Text>
           <TextInput style={s.input} value={tokenInput} onChangeText={setTokenInput}
             autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="shared secret" placeholderTextColor={C.dim} />
+          <Text style={s.connectHintSm}>Relay: wss URL + token (works anywhere, ~200ms).{'\n'}Direct LAN: ws://192.168.50.245:4848, leave token blank (~1ms, same wifi only).</Text>
           <Text style={s.fieldLabel}>HANDOFF URL (OPTIONAL)</Text>
           <TextInput style={s.input} value={mcpInput} onChangeText={setMcpInput}
             autoCapitalize="none" autoCorrect={false} placeholder="https://…mcp host" placeholderTextColor={C.dim} />
@@ -211,6 +214,7 @@ export default function App() {
           <TouchableOpacity onPress={() => setGuard((g) => { const n = !g; AsyncStorage.setItem('gab.guard', n ? '1' : '0'); return n; })}>
             <Text style={[s.guard, guard && s.guardOn]}>{guard ? '◆ GUARD' : '◇ OPEN'}</Text>
           </TouchableOpacity>
+          {connected && latency != null && <Text style={[s.lat, latency < 25 && s.latFast]}>{latency}ms</Text>}
           <Text style={[s.status, { color: statusColor }]}>{status}</Text>
         </View>
       </View>
@@ -307,6 +311,9 @@ const s = StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   guard: { color: C.dim, letterSpacing: 1.5, fontSize: 11, fontFamily: MONO },
   guardOn: { color: C.lime },
+  lat: { color: C.dim, fontSize: 11, fontFamily: MONO },
+  latFast: { color: C.lime },
+  connectHintSm: { color: C.dim, fontSize: 11, lineHeight: 16, marginTop: 8, fontFamily: MONO },
   chipGuard: { color: C.lime, fontSize: 11, paddingLeft: 6 },
 
   handoffStack: { padding: 8, paddingBottom: 0 },

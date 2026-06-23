@@ -85,6 +85,9 @@ defmodule Relay.Room do
   def handle_cast({:client_frame, from, text}, state) do
     role = Map.get(state.clients, from, "view")              # control = drive · view = read-only
     case Jason.decode(text) do
+      {:ok, %{"type" => "ping"} = m} ->                       # latency probe — echo straight back
+        send(from, {:relay, Jason.encode!(%{"type" => "pong", "t" => m["t"]})})
+
       {:ok, %{"type" => "sync"}} ->
         send(from, {:relay, sessions_json(state)})
 

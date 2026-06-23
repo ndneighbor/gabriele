@@ -9,6 +9,8 @@ export function createRelay({ url, token, on = {} }) {
   let sessions = new Map(); // id -> meta
   let profiles = [];        // [{id,label}] advertised by the bridge
   let defaultProfile = null;
+  const direct = !token;    // no token => talk straight to the bridge's LAN server (no relay, no detour)
+  let pingTimer = null;
 
   const ordered = () => [...sessions.values()].sort((a, b) => a.startedAt - b.startedAt);
   const emitChannels = () => on.channels && on.channels(ordered(), focusedId);
@@ -17,11 +19,19 @@ export function createRelay({ url, token, on = {} }) {
     if (ready && ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
   }
 
+  function startProbe() {   // live RTT readout: ping every 2s, pong measures the link
+    clearInterval(pingTimer);
+    pingTimer = setInterval(() => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping', t: Date.now() })); }, 2000);
+  }
+
   function connect() {
     ready = false;
     ws = new WebSocket(url);
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', role: 'client', token }));
-    ws.onclose = () => { ready = false; on.status && on.status(false, false); setTimeout(connect, 1500); };
+    ws.onopen = () => {
+      if (direct) { ready = true; on.status && on.status(true, true); send({ type: 'sync' }); startProbe(); } // LAN: the bridge is right here
+      else ws.send(JSON.stringify({ type: 'hello', role: 'client', token }));
+    };
+    ws.onclose = () => { ready = false; clearInterval(pingTimer); on.status && on.status(false, false); setTimeout(connect, 1500); };
     ws.onerror = () => { try { ws.close(); } catch {} };
     ws.onmessage = (e) => handle(JSON.parse(e.data));
   }
@@ -32,6 +42,10 @@ export function createRelay({ url, token, on = {} }) {
         ready = true;
         on.status && on.status(true, m.host_present !== false);
         send({ type: 'sync' });
+        startProbe();
+        break;
+      case 'pong':
+        on.latency && on.latency(Date.now() - m.t);
         break;
       case 'host_up':
         on.status && on.status(true, true);
@@ -84,6 +98,6 @@ export function createRelay({ url, token, on = {} }) {
     get focusedId() { return focusedId; },
     get profiles() { return profiles; },
     get defaultProfile() { return defaultProfile; },
-    disconnect() { try { ws && ws.close(); } catch {} },
+    disconnect() { clearInterval(pingTimer); try { ws && ws.close(); } catch {} },
   };
 }
