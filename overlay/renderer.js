@@ -127,15 +127,18 @@ function connect() {
     if (RELAY) ws.send(JSON.stringify({ type: 'hello', role: 'client', token })); // auth, then wait for hello_ok
     else onReady(true);                                                            // direct LAN bridge: live now
   };
-  ws.onclose = () => { ready = false; setConn(false); setTimeout(connect, 1200); };
+  ws.onclose = () => { ready = false; clearInterval(keepalive); setConn(false); setTimeout(connect, 1200); };
   ws.onerror = () => ws.close();
   ws.onmessage = (e) => handle(JSON.parse(e.data));
 }
 
+let keepalive = null;
 function onReady(hostPresent) {
   ready = true;
   setConn(hostPresent);     // direct: connected · relay: only if the Mac bridge is live
   wsSend({ type: 'sync' });  // pull the current session list
+  clearInterval(keepalive);  // app-level heartbeat so the relay's idle reaper doesn't cull an idle overlay
+  keepalive = setInterval(() => wsSend({ type: 'ping', t: Date.now() }), 25000);
 }
 
 function handle(msg) {

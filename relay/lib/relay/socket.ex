@@ -16,10 +16,12 @@ defmodule Relay.Socket do
   """
   @behaviour WebSock
 
+  @idle_reap_ms 90_000   # reap a client that sends no app-level frame this long (zombie reloaded app)
+
   @impl true
   def init(_opts) do
     schedule_ping()
-    {:ok, %{authed: false, role: nil, room: nil, missed: 0}}
+    {:ok, %{authed: false, role: nil, room: nil, missed: 0, last_in: System.monotonic_time(:millisecond)}}
   end
 
   # ---- before auth: only a valid hello gets through ----
@@ -38,12 +40,12 @@ defmodule Relay.Socket do
   # ---- after auth: hand the frame to the room ----
   def handle_in({text, [opcode: :text]}, %{authed: true, role: "host", room: room} = state) do
     Relay.Room.host_frame(room, text)
-    {:ok, state}
+    {:ok, %{state | last_in: System.monotonic_time(:millisecond)}}
   end
 
   def handle_in({text, [opcode: :text]}, %{authed: true, role: role, room: room} = state) when role in ["control", "view"] do
     Relay.Room.client_frame(room, self(), text)
-    {:ok, state}
+    {:ok, %{state | last_in: System.monotonic_time(:millisecond)}}
   end
 
   def handle_in(_frame, state), do: {:ok, state}
@@ -111,12 +113,19 @@ defmodule Relay.Socket do
   def handle_info({:relay, text}, state), do: {:push, {:text, text}, state}
 
   def handle_info(:ping, %{missed: missed} = state) when missed >= 2 do
-    {:stop, :normal, state}                                  # client stopped pong-ing — reap the zombie
+    {:stop, :normal, state}                                  # stopped pong-ing — reap
   end
 
   def handle_info(:ping, state) do
-    schedule_ping()
-    {:push, {:ping, ""}, %{state | missed: state.missed + 1}}
+    idle = System.monotonic_time(:millisecond) - state.last_in
+    # a reloaded app's native socket auto-pongs (fooling the pong reaper) but sends
+    # no app frames; live clients heartbeat via their latency ping. So: idle => zombie.
+    if state.role in ["control", "view"] and idle > @idle_reap_ms do
+      {:stop, :normal, state}
+    else
+      schedule_ping()
+      {:push, {:ping, ""}, %{state | missed: state.missed + 1}}
+    end
   end
 
   def handle_info(_msg, state), do: {:ok, state}
