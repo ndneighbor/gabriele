@@ -80,10 +80,20 @@ defmodule Relay.Room do
   end
 
   # ---- host frames: cache, THEN broadcast (append-before-fanout) ----
+  # Exception: `snapshot` is cache-ONLY. A serialized full-screen frame is for the
+  # focus/replay path (a newly-attached client resets + paints it once). Fanning it
+  # out to ALREADY-attached clients mid-stream is corrupting: the client's reset
+  # drops any escape split across two deltas (the next delta's tail renders as
+  # literal text, e.g. `244m`) and desyncs the cursor so the TUI's relative redraws
+  # stack. Attached clients get a pure delta stream — like a real terminal.
   @impl true
   def handle_cast({:host_frame, text}, state) do
-    state = apply_host(state, text)
-    PubSub.broadcast(Relay.PubSub, down(state.room), {:relay, text})
+    decoded = Jason.decode(text)
+    state = apply_host(state, decoded)
+    case decoded do
+      {:ok, %{"type" => "snapshot"}} -> :ok
+      _ -> PubSub.broadcast(Relay.PubSub, down(state.room), {:relay, text})
+    end
     {:noreply, state}
   end
 
@@ -145,39 +155,36 @@ defmodule Relay.Room do
   def handle_info(:evict, state), do: {:noreply, %{state | evict: nil}}
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # ---- cache updates from host frames ----
-  defp apply_host(state, text) do
-    case Jason.decode(text) do
-      {:ok, %{"type" => "sessions"} = m} ->
-        sessions = Map.new(m["sessions"] || [], &{&1["id"], &1})
-        %{state |
-          sessions: sessions,
-          profiles: m["profiles"] || state.profiles,
-          default: m["defaultProfile"] || state.default,
-          buffers: Map.take(state.buffers, Map.keys(sessions))}  # prune dead-PTY scrollback on (re)sync
+  # ---- cache updates from host frames (takes the already-decoded frame) ----
+  defp apply_host(state, {:ok, %{"type" => "sessions"} = m}) do
+    sessions = Map.new(m["sessions"] || [], &{&1["id"], &1})
+    %{state |
+      sessions: sessions,
+      profiles: m["profiles"] || state.profiles,
+      default: m["defaultProfile"] || state.default,
+      buffers: Map.take(state.buffers, Map.keys(sessions))}  # prune dead-PTY scrollback on (re)sync
+  end
 
-      {:ok, %{"type" => "session", "meta" => meta}} when is_map(meta) ->
-        %{state | sessions: Map.put(state.sessions, meta["id"], meta)}
+  defp apply_host(state, {:ok, %{"type" => "session", "meta" => meta}}) when is_map(meta),
+    do: %{state | sessions: Map.put(state.sessions, meta["id"], meta)}
 
-      {:ok, %{"type" => "closed", "id" => id}} ->
-        %{state | sessions: Map.delete(state.sessions, id), buffers: Map.delete(state.buffers, id)}
+  defp apply_host(state, {:ok, %{"type" => "closed", "id" => id}}),
+    do: %{state | sessions: Map.delete(state.sessions, id), buffers: Map.delete(state.buffers, id)}
 
-      {:ok, %{"type" => "exit", "id" => id}} ->
-        case Map.get(state.sessions, id) do
-          nil -> state
-          meta -> %{state | sessions: Map.put(state.sessions, id, Map.put(meta, "state", "exited"))}
-        end
-
-      {:ok, %{"type" => "data", "id" => id, "data" => d}} when is_binary(d) ->
-        %{state | buffers: Map.update(state.buffers, id, cap(d), &cap(&1 <> d))}
-
-      {:ok, %{"type" => "snapshot", "id" => id, "data" => d}} when is_binary(d) ->
-        %{state | buffers: Map.put(state.buffers, id, cap(d))}
-
-      _ ->
-        state
+  defp apply_host(state, {:ok, %{"type" => "exit", "id" => id}}) do
+    case Map.get(state.sessions, id) do
+      nil -> state
+      meta -> %{state | sessions: Map.put(state.sessions, id, Map.put(meta, "state", "exited"))}
     end
   end
+
+  defp apply_host(state, {:ok, %{"type" => "data", "id" => id, "data" => d}}) when is_binary(d),
+    do: %{state | buffers: Map.update(state.buffers, id, cap(d), &cap(&1 <> d))}
+
+  defp apply_host(state, {:ok, %{"type" => "snapshot", "id" => id, "data" => d}}) when is_binary(d),
+    do: %{state | buffers: Map.put(state.buffers, id, cap(d))}
+
+  defp apply_host(state, _), do: state
 
   # ---- helpers ----
   defp to_host(%{host: host}, text) when is_pid(host), do: send(host, {:relay, text})
