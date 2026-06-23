@@ -21,13 +21,23 @@ const HTML = `<!doctype html><html><head>
       red:'#e8483e', green:'#c2ec3a', yellow:'#e0c454', blue:'#5aa9ff', cyan:'#46c8dc' }
   });
   var fit = new FitAddon.FitAddon(); term.loadAddon(fit);
-  term.open(document.getElementById('t'));
+  var el = document.getElementById('t');
+  term.open(el);
   function post(o){ window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(o)); }
-  function emitSize(){ post({ t: 'size', cols: term.cols, rows: term.rows }); }
-  function refit(){ try { fit.fit(); } catch(e){} emitSize(); }
-  refit(); window.addEventListener('resize', refit);
-  try { new ResizeObserver(refit).observe(document.getElementById('t')); } catch(e){} // refit once the WebView actually has its size
-  setTimeout(refit, 300);
+  var gen = 0, lastC = 0, lastR = 0, deb = null;
+  function refit(){
+    try { fit.fit(); } catch(e){}
+    if (term.cols < 2 || term.rows < 2 || el.clientWidth === 0) return;   // ignore degenerate pre-layout fits
+    if (term.cols === lastC && term.rows === lastR) return;               // dedupe — no postMessage spam / no needless PTY resize
+    lastC = term.cols; lastR = term.rows;
+    post({ t: 'size', cols: term.cols, rows: term.rows, gen: ++gen });
+  }
+  function refitSoon(){ clearTimeout(deb); deb = setTimeout(refit, 80); } // coalesce load/layout/keyboard flutter into one size
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve())
+    .then(function(){ requestAnimationFrame(function(){ requestAnimationFrame(refit); }); }); // first fit only after fonts + real layout
+  window.addEventListener('resize', refitSoon);
+  try { new ResizeObserver(refitSoon).observe(el); } catch(e){}
+  if (window.visualViewport) { visualViewport.addEventListener('resize', refitSoon); visualViewport.addEventListener('scroll', refitSoon); } // soft keyboard shrinks the visual viewport without firing window.resize
   window.__write = function(d){ term.write(d); };
   window.__reset = function(d){ term.reset(); if (d) term.write(d); };
 </script></body></html>`;
@@ -50,7 +60,7 @@ export const Term = memo(forwardRef(({ onSize }, ref) => {
       domStorageEnabled
       scrollEnabled={false}
       onMessage={(e) => {
-        try { const m = JSON.parse(e.nativeEvent.data); if (m.t === 'size' && onSize) onSize(m.cols, m.rows); } catch {}
+        try { const m = JSON.parse(e.nativeEvent.data); if (m.t === 'size' && onSize) onSize(m.cols, m.rows, m.gen); } catch {}
       }}
     />
   );

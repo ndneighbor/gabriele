@@ -9,6 +9,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { Terminal: HeadlessTerminal } = require('@xterm/headless');
+const { SerializeAddon } = require('@xterm/addon-serialize');
 const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = Number(process.env.GABRIELE_PORT || 4848);
@@ -67,6 +69,29 @@ function setState(s, state) {
   broadcast({ type: 'session', meta: meta(s) });
 }
 
+// One coherent current frame for focus/replay: exit alt-screen + clear + home +
+// reset SGR, then the serialized screen (serialize re-enters alt-screen for a TUI).
+function broadcastSnapshot(s) {
+  if (!sessions.has(s.id)) return;
+  try {
+    const frame = '\x1b[?1049l\x1b[2J\x1b[3J\x1b[H\x1b[0m' + s.ser.serialize();
+    broadcast({ type: 'snapshot', id: s.id, data: frame });
+  } catch {}
+}
+
+// Guarded resize: drop out-of-order (gen), floor to a usable grid, dedupe, then
+// resize the PTY AND the headless mirror and push the reflowed frame.
+function applyResize(s, m) {
+  if (typeof m.gen === 'number' && m.gen < s.sizeGen) return;
+  if (typeof m.gen === 'number') s.sizeGen = m.gen;
+  const cols = Math.max(20, m.cols | 0), rows = Math.max(6, m.rows | 0); // rows floor keeps claude's input box on-screen
+  if (cols === s.cols && rows === s.rows) return;                        // dedupe — no SIGWINCH, no reflow flicker
+  s.cols = cols; s.rows = rows;
+  try { s.pty.resize(cols, rows); } catch {}
+  try { s.emu.resize(cols, rows); } catch {}
+  broadcastSnapshot(s);
+}
+
 function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, resumeId } = {}) {
   cmd = cmd || DEFAULT_CMD;
   cwd = cwd || DEFAULT_CWD;
@@ -96,12 +121,19 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, 
   if (approvals) env.GABRIELE_APPROVALS = '1'; // PreToolUse hook routes this channel's tool calls to the phone
   else delete env.GABRIELE_APPROVALS;
 
+  const startCols = cols || 80, startRows = rows || 24;
   const term = pty.spawn(cmd, args, {
     name: 'xterm-256color',
-    cols: cols || 80, rows: rows || 24,
+    cols: startCols, rows: startRows,
     cwd,
     env,
   });
+
+  // headless xterm mirrors the live screen, so focus replays ONE coherent frame
+  // (serialize) instead of the raw redraw history — which is what smears a TUI.
+  const emu = new HeadlessTerminal({ cols: startCols, rows: startRows, scrollback: 1000, allowProposedApi: true });
+  const ser = new SerializeAddon();
+  emu.loadAddon(ser);
 
   const s = {
     id: String(nextId++),
@@ -114,19 +146,21 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, 
     state: 'running',
     startedAt: Date.now(),
     pty: term,
-    buffer: '',
+    emu, ser,
+    cols: startCols, rows: startRows, sizeGen: 0, resnapTimer: null,
     idleTimer: null,
   };
   sessions.set(s.id, s);
 
   term.onData((data) => {
     if (!sessions.has(s.id)) return; // closed/removed — ignore late output
-    s.buffer += data;
-    if (s.buffer.length > BUFFER_CAP) s.buffer = s.buffer.slice(-BUFFER_CAP);
-    broadcast({ type: 'data', id: s.id, data });
+    s.emu.write(data);                              // mirror into the headless screen (the replay source)
+    broadcast({ type: 'data', id: s.id, data });    // live delta to attached clients
     setState(s, 'running');
     clearTimeout(s.idleTimer);
     s.idleTimer = setTimeout(() => setState(s, 'idle'), IDLE_MS);
+    clearTimeout(s.resnapTimer);                     // once output settles, push a clean frame so the relay cache stays coherent
+    s.resnapTimer = setTimeout(() => broadcastSnapshot(s), 250);
   });
 
   term.onExit(({ exitCode }) => {
@@ -182,10 +216,10 @@ function handleMessage(m) {
       if (s && s.state !== 'exited') s.pty.write(m.data);
       break;
     case 'resize':
-      if (s && s.state !== 'exited') { try { s.pty.resize(m.cols, m.rows); } catch {} }
+      if (s && s.state !== 'exited') applyResize(s, m);
       break;
-    case 'focus':                      // replay this pane's scrollback
-      if (s) broadcast({ type: 'snapshot', id: s.id, data: s.buffer });
+    case 'focus':                      // push a clean current frame (serialized), not raw history
+      if (s) broadcastSnapshot(s);
       break;
     case 'kill':
       if (s) { try { s.pty.kill(); } catch {} }

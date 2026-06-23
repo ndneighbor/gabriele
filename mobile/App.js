@@ -144,12 +144,12 @@ export default function App() {
     } catch {}
   }
 
-  const onSize = useCallback((cols, rows) => {
+  const onSize = useCallback((cols, rows, gen) => {
     termSize.current = { cols: cols || 80, rows: rows || 24 };
     const r = relayRef.current;
     if (!r) return;
-    r.resize(termSize.current.cols, termSize.current.rows); // keep the PTY matched to the phone (fixes garbled wrap)
-    if (!termReady.current) { termReady.current = true; if (r.focusedId) r.focus(r.focusedId); } // pull scrollback once
+    r.resize(termSize.current.cols, termSize.current.rows, gen); // keep the PTY matched to the phone — the size IS the garble fix
+    if (!termReady.current) { termReady.current = true; if (r.focusedId) r.focus(r.focusedId); } // resize THEN focus, once
   }, []);
 
   const sendKey = (seq) => relayRef.current && relayRef.current.input(seq);
