@@ -3,6 +3,8 @@
 // Native and can be unit-tested in Node against the live relay.
 
 export function createRelay({ url, token, on = {} }) {
+  const clientId = `mobile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const clientKind = 'mobile';
   let ws;
   let ready = false;
   let focusedId = null;
@@ -17,19 +19,25 @@ export function createRelay({ url, token, on = {} }) {
   const emitChannels = () => on.channels && on.channels(ordered(), focusedId);
 
   function send(obj) {
-    if (ready && ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+    if (ready && ws && ws.readyState === 1) ws.send(JSON.stringify({ clientId, clientKind, ...obj }));
   }
 
   function startProbe() {   // live RTT readout: ping every 2s, pong measures the link
     clearInterval(pingTimer);
-    pingTimer = setInterval(() => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping', t: Date.now() })); }, 2000);
+    pingTimer = setInterval(() => { if (ws && ws.readyState === 1) send({ type: 'ping', t: Date.now() }); }, 2000);
   }
 
   function connect() {
     ready = false;
-    ws = new WebSocket(url);
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      on.status && on.status(false, false);
+      setTimeout(connect, 1500);
+      return;
+    }
     ws.onopen = () => {
-      if (direct) { ready = true; on.status && on.status(true, true); send({ type: 'sync' }); startProbe(); } // LAN: the bridge is right here
+      if (direct) { ready = true; on.status && on.status(true, true); send({ type: 'client_hello' }); send({ type: 'sync' }); startProbe(); } // LAN: the bridge is right here
       else ws.send(JSON.stringify({ type: 'hello', role: 'client', token }));
     };
     ws.onclose = () => { ready = false; wasDown = true; clearInterval(pingTimer); on.status && on.status(false, false); setTimeout(connect, 1500); };
@@ -42,6 +50,7 @@ export function createRelay({ url, token, on = {} }) {
       case 'hello_ok':
         ready = true;
         on.status && on.status(true, m.host_present !== false);
+        send({ type: 'client_hello' });
         send({ type: 'sync' });
         startProbe();
         break;
@@ -62,12 +71,12 @@ export function createRelay({ url, token, on = {} }) {
           defaultProfile = m.defaultProfile || (m.profiles[0] && m.profiles[0].id) || null;
           on.profiles && on.profiles(profiles, defaultProfile);
         }
+        emitChannels();
         // Repaint ONLY after a genuine reconnect (wasDown), not on every sessions frame —
         // otherwise a flapping link triggers a reset storm mid-stream (the garble).
         if (focusedId && sessions.has(focusedId)) { if (wasDown) focus(focusedId); }
         else if (m.sessions[0]) focus(m.sessions[0].id);
         wasDown = false;
-        emitChannels();
         break;
       case 'session': {
         const prev = sessions.get(m.meta.id);

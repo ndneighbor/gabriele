@@ -14,9 +14,10 @@ const { SerializeAddon } = require('@xterm/addon-serialize');
 const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = Number(process.env.GABRIELE_PORT || 4848);
-const DEFAULT_CMD = process.env.GABRIELE_CMD || 'claude';
+const DEFAULT_CMD = process.env.GABRIELE_CMD || 'codex';
+const DEFAULT_ARGS = parseArgs(process.env.GABRIELE_ARGS || '');
 const DEFAULT_CWD = process.env.GABRIELE_CWD || process.cwd();
-const SKIP_PERMS = process.env.GABRIELE_SKIP_PERMS !== '0'; // claude runs --dangerously-skip-permissions by default
+const SKIP_PERMS = process.env.GABRIELE_SKIP_PERMS !== '0'; // Claude Code can run --dangerously-skip-permissions by default
 const RELAY_URL = process.env.GABRIELE_RELAY_URL || '';     // if set, dial out to the relay as host
 const TOKEN = process.env.GABRIELE_TOKEN || '';
 const BUFFER_CAP = 200 * 1024; // per-session scrollback kept for replay
@@ -43,9 +44,51 @@ const profileById = (id) => PROFILES.find((p) => p.id === id);
 const expandHome = (p) => (p && p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
 console.log(`[gabriele] profiles: ${PROFILES.map((p) => p.id).join(', ')} (default ${DEFAULT_PROFILE})`);
 
+function parseArgs(s) {
+  if (!s.trim()) return [];
+  try {
+    const parsed = JSON.parse(s);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {}
+  return s.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((p) => p.replace(/^(['"])(.*)\1$/, '$2')) || [];
+}
+
+function agentKind(cmd) {
+  const base = path.basename(cmd || '').toLowerCase();
+  if (base === 'claude' || base === 'claude-code') return 'claude';
+  if (base === 'codex') return 'codex';
+  return base || 'agent';
+}
+
+// Where a channel's claude transcripts live: <configDir>/projects/. The default
+// profile uses ~/.claude; a per-profile channel uses its own CLAUDE_CONFIG_DIR.
+function configDirFor(profile) {
+  const prof = profileById(profile);
+  return prof && prof.configDir ? expandHome(prof.configDir) : path.join(os.homedir(), '.claude');
+}
+
+// Has claude actually saved a conversation for this session id? Transcripts are
+// <configDir>/projects/<sanitized-cwd>/<id>.jsonl, but claude's cwd->dir sanitizer
+// isn't a plain substitution (it strips every non-alphanumeric char and hash-
+// truncates long paths), so we don't reconstruct it — we look for the uniquely-
+// named <id>.jsonl anywhere under projects/ (session ids are UUIDs). No transcript
+// => --resume would die with "No conversation found", so the caller starts fresh.
+function transcriptExists(sessionId, profile) {
+  if (!sessionId) return false;
+  const projects = path.join(configDirFor(profile), 'projects');
+  const file = `${sessionId}.jsonl`;
+  let dirs;
+  try { dirs = fs.readdirSync(projects); } catch { return false; }
+  for (const d of dirs) {
+    try { if (fs.existsSync(path.join(projects, d, file))) return true; } catch {}
+  }
+  return false;
+}
+
 // id -> { id, title, cwd, cmd, state, startedAt, pty, buffer, idleTimer }
 const sessions = new Map();
 let nextId = 1;
+const clients = new Map(); // clientId -> { kind, lastSeen }
 
 let relay = null;        // ws client to the relay (host mode)
 let relayAuthed = false;
@@ -53,9 +96,23 @@ let relayAuthed = false;
 const wss = new WebSocketServer({ host: '0.0.0.0', port: PORT });
 console.log(`[gabriele] bridge listening on ws://0.0.0.0:${PORT}`);
 
-const meta = (s) => ({ id: s.id, title: s.title, cwd: s.cwd, cmd: s.cmd, state: s.state, startedAt: s.startedAt, profile: s.profile, profileLabel: s.profileLabel, approvals: s.approvals });
+const meta = (s) => ({ id: s.id, title: s.title, cwd: s.cwd, cmd: s.cmd, kind: s.kind, state: s.state, startedAt: s.startedAt, profile: s.profile, profileLabel: s.profileLabel, approvals: s.approvals, cols: s.cols, rows: s.rows, sizeOwner: s.sizeOwner });
 const profilesList = () => PROFILES.map((p) => ({ id: p.id, label: p.label }));
 const sessionsSnapshot = () => ({ type: 'sessions', sessions: [...sessions.values()].map(meta), profiles: profilesList(), defaultProfile: DEFAULT_PROFILE });
+
+function noteClient(m) {
+  if (!m.clientId) return;
+  clients.set(m.clientId, { kind: m.clientKind || 'unknown', lastSeen: Date.now() });
+}
+
+function hasRecentDesktop(exceptId) {
+  const now = Date.now();
+  for (const [id, c] of clients) {
+    if (now - c.lastSeen > 15_000) { clients.delete(id); continue; }
+    if (id !== exceptId && c.kind === 'desktop') return true;
+  }
+  return false;
+}
 
 function broadcast(msg) {
   const data = JSON.stringify(msg);
@@ -82,28 +139,57 @@ function broadcastSnapshot(s) {
 // Guarded resize: drop out-of-order (gen), floor to a usable grid, dedupe, then
 // resize the PTY AND the headless mirror and push the reflowed frame.
 function applyResize(s, m) {
+  noteClient(m);
+  if (m.clientKind === 'mobile' && hasRecentDesktop(m.clientId)) {
+    broadcast({ type: 'session', meta: meta(s) });
+    return;
+  }
   if (typeof m.gen === 'number' && m.gen < s.sizeGen) return;
   if (typeof m.gen === 'number') s.sizeGen = m.gen;
   const cols = Math.max(20, m.cols | 0), rows = Math.max(6, m.rows | 0); // rows floor keeps claude's input box on-screen
   if (cols === s.cols && rows === s.rows) return;                        // dedupe — no SIGWINCH, no reflow flicker
   s.cols = cols; s.rows = rows;
+  s.sizeOwner = { id: m.clientId || null, kind: m.clientKind || 'unknown', at: Date.now() };
   try { s.pty.resize(cols, rows); } catch {}
   try { s.emu.resize(cols, rows); } catch {}
+  broadcast({ type: 'session', meta: meta(s) });
   broadcastSnapshot(s);
 }
 
-function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, resumeId } = {}) {
+// Drop any id flag a value may carry so it's re-derived cleanly below — guards against
+// a legacy state file persisted before the flag was kept out of the saved args.
+function stripIdFlags(arr) {
+  const out = [];
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] === '--session-id' || arr[i] === '--resume') { i++; continue; } // skip flag + its value
+    out.push(arr[i]);
+  }
+  return out;
+}
+
+function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, resumeId, clientId, clientKind } = {}) {
   cmd = cmd || DEFAULT_CMD;
   cwd = cwd || DEFAULT_CWD;
-  args = args || [];
-  const isClaude = /(^|\/)claude$/.test(cmd);
+  const extraArgs = stripIdFlags(args || [...DEFAULT_ARGS]); // user/agent args ONLY — the id flag is re-derived each spawn, never persisted (else it accumulates on every restore)
+  args = extraArgs;
+  const kind = agentKind(cmd);
+  const isClaude = kind === 'claude';
 
   // tag each claude conversation with a stable session id so it survives a bridge
-  // restart: --session-id when fresh, --resume <id> when restoring.
-  let sessionId = null;
+  // restart: --session-id when fresh, --resume <id> when restoring. But only --resume
+  // if claude actually saved that conversation — if the prior claude was killed before
+  // it wrote a transcript, --resume dies with "No conversation found" and the restored
+  // channel is dead on arrival. In that case start FRESH under the same stable id, so
+  // the channel is immediately usable (new conversation, same id) instead of an error.
+  let sessionId = null, resumed = false;
   if (isClaude) {
-    if (resumeId) { sessionId = resumeId; args = ['--resume', resumeId, ...args]; }
-    else { sessionId = crypto.randomUUID(); args = ['--session-id', sessionId, ...args]; }
+    if (resumeId && transcriptExists(resumeId, profile)) {
+      sessionId = resumeId; resumed = true; args = ['--resume', resumeId, ...extraArgs];
+    } else if (resumeId) {
+      sessionId = resumeId; args = ['--session-id', resumeId, ...extraArgs];
+    } else {
+      sessionId = crypto.randomUUID(); args = ['--session-id', sessionId, ...extraArgs];
+    }
   }
 
   // fire-and-forget: claude sessions skip permission prompts (nobody's watching mid-game)
@@ -138,7 +224,8 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, 
   const s = {
     id: String(nextId++),
     title: title || `${cmd.split('/').pop()} · ${cwd.split('/').pop()}`,
-    cwd, cmd,
+    cwd, cmd, args, extraArgs,
+    kind,
     sessionId,
     profile: prof ? prof.id : null,
     profileLabel: prof ? prof.label : null,
@@ -147,7 +234,9 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, 
     startedAt: Date.now(),
     pty: term,
     emu, ser,
-    cols: startCols, rows: startRows, sizeGen: 0, resnapTimer: null,
+    cols: startCols, rows: startRows, sizeGen: 0,
+    sizeOwner: { id: clientId || null, kind: clientKind || 'initial', at: Date.now() },
+    resnapTimer: null,
     idleTimer: null,
   };
   sessions.set(s.id, s);
@@ -173,7 +262,7 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, 
   });
 
   broadcast({ type: 'session', meta: meta(s) });
-  console.log(`[gabriele] session ${s.id}: ${cmd} @ ${cwd} [${prof ? prof.id : 'default'}]${resumeId ? ' (resumed)' : ''}`);
+  console.log(`[gabriele] session ${s.id}: ${cmd} @ ${cwd} [${prof ? prof.id : 'default'}]${resumed ? ' (resumed)' : resumeId ? ' (restored fresh — no transcript)' : ''}`);
   persistSessions();
   return s;
 }
@@ -184,7 +273,7 @@ function persistSessions() {
   try {
     const list = [...sessions.values()]
       .filter((s) => s.state !== 'exited')
-      .map((s) => ({ sessionId: s.sessionId, cmd: s.cmd, cwd: s.cwd, profile: s.profile, approvals: s.approvals, title: s.title }));
+      .map((s) => ({ sessionId: s.sessionId, cmd: s.cmd, cwd: s.cwd, profile: s.profile, approvals: s.approvals, title: s.title, args: s.extraArgs }));
     fs.writeFileSync(STATE_FILE, JSON.stringify(list));
   } catch {}
 }
@@ -196,7 +285,7 @@ function restoreSessions() {
   if (!Array.isArray(list) || !list.length) return;
   console.log(`[gabriele] restoring ${list.length} channel(s)`);
   for (const e of list) {
-    try { createSession({ cmd: e.cmd, cwd: e.cwd, profile: e.profile, approvals: e.approvals, title: e.title, resumeId: e.sessionId }); }
+    try { createSession({ cmd: e.cmd, args: e.args, cwd: e.cwd, profile: e.profile, approvals: e.approvals, title: e.title, resumeId: e.sessionId }); }
     catch (err) { console.log(`[gabriele] restore failed (${e.cwd}): ${err.message}`); }
   }
 }
@@ -204,8 +293,11 @@ function restoreSessions() {
 // One inbound handler for both local clients and relay-forwarded clients.
 // Replies broadcast (the relay can't target one remote client) — clients filter by id.
 function handleMessage(m) {
+  noteClient(m);
   const s = m.id && sessions.get(m.id);
   switch (m.type) {
+    case 'client_hello':
+      break;
     case 'sync':                       // client asks for the current session list
       broadcast(sessionsSnapshot());
       break;

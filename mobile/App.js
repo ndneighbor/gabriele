@@ -45,6 +45,8 @@ export default function App() {
   const relayRef = useRef(null);
   const termRef = useRef(null);
   const termSize = useRef({ cols: 80, rows: 24 });
+  const focusedSize = useRef(null);
+  const lastResizeSent = useRef(null);
   const termReady = useRef(false);
 
   useEffect(() => {
@@ -68,7 +70,11 @@ export default function App() {
         status: (conn, host) => { setConnected(conn); setHostPresent(host); },
         channels: (list, fid) => { setChannels(list); setFocusedId(fid); },
         data: (id, d) => termRef.current && termRef.current.write(d),
-        snapshot: (id, d) => termRef.current && termRef.current.write(d), // frame self-clears (ESC[2J/3J/H); write not reset => no parser reset can drop a split escape
+        snapshot: (id, d) => {
+          const meta = relayRef.current?.ordered().find((c) => c.id === id);
+          if (meta?.cols) termRef.current && termRef.current.setRemoteSize(meta.cols, meta.rows || 24);
+          termRef.current && termRef.current.write(d);
+        }, // frame self-clears (ESC[2J/3J/H); write not reset => no parser reset can drop a split escape
         profiles: (list, def) => { setProfiles(list); setDefaultProfile(def); },
         latency: (ms) => setLatency(ms),
       },
@@ -148,14 +154,29 @@ export default function App() {
     termSize.current = { cols: cols || 80, rows: rows || 24 };
     const r = relayRef.current;
     if (!r) return;
-    r.resize(termSize.current.cols, termSize.current.rows, gen); // keep the PTY matched to the phone — the size IS the garble fix
+    const active = focusedSize.current;
+    const ownsActiveSize = active && lastResizeSent.current &&
+      lastResizeSent.current.cols === active.cols && lastResizeSent.current.rows === active.rows;
+    if (active?.cols && active.cols !== termSize.current.cols && !ownsActiveSize) return;
+    lastResizeSent.current = termSize.current;
+    r.resize(termSize.current.cols, termSize.current.rows, gen); // only resize sessions whose current grid came from this phone
     if (!termReady.current) { termReady.current = true; if (r.focusedId) r.focus(r.focusedId); } // resize THEN focus, once
   }, []);
 
   const sendKey = (seq) => relayRef.current && relayRef.current.input(seq);
   const sendPrompt = () => { if (prompt.trim() && relayRef.current) { relayRef.current.input(prompt + '\r'); setPrompt(''); } };
-  const addChannel = (profile) => { setPickerOpen(false); relayRef.current && relayRef.current.newSession(termSize.current.cols, termSize.current.rows, profile || defaultProfile, guard); };
+  const addChannel = (profile) => {
+    setPickerOpen(false);
+    lastResizeSent.current = termSize.current;
+    relayRef.current && relayRef.current.newSession(termSize.current.cols, termSize.current.rows, profile || defaultProfile, guard);
+  };
   const onPlus = () => (profiles.length > 1 ? setPickerOpen(true) : addChannel(defaultProfile)); // pick a login if there's more than one
+
+  useEffect(() => {
+    const active = channels.find((c) => c.id === focusedId);
+    focusedSize.current = active?.cols ? { cols: active.cols, rows: active.rows || 24 } : null;
+    if (active?.cols) termRef.current && termRef.current.setRemoteSize(active.cols, active.rows || 24);
+  }, [channels, focusedId]);
 
   function saveAndConnect() {
     const url = urlInput.trim(), token = tokenInput.trim(), mcp = mcpInput.trim();

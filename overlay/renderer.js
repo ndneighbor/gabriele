@@ -17,6 +17,8 @@ const scrollPos = new Map(); // id -> scroll offset from bottom (spatial continu
 let lastClosed = null;       // {cmd, cwd, profile} of the most recently closed channel (⌘⇧T reopen)
 let profiles = [];           // [{id,label}] logins advertised by the relay/bridge
 let defaultProfile = null;
+const clientId = `desktop-${crypto.randomUUID()}`;
+const clientKind = 'desktop';
 
 // ---- terminal ----
 const term = new Terminal({
@@ -73,7 +75,7 @@ term.attachCustomKeyEventHandler((e) => {
 });
 
 function wsSend(obj) {
-  if (ready && ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  if (ready && ws && ws.readyState === 1) ws.send(JSON.stringify({ clientId, clientKind, ...obj }));
 }
 
 function sendResize() {
@@ -113,8 +115,10 @@ function closeSession(id) {
 
 function reopenLast() {
   if (!lastClosed) return;
-  // claude resumes the last conversation in that cwd via --continue (transcript persists)
-  const args = /claude/.test(lastClosed.cmd || '') ? ['--continue'] : [];
+  // Agent-specific resume is best-effort; unknown agents reopen fresh.
+  const args = /claude/.test(lastClosed.cmd || '') ? ['--continue']
+    : /codex/.test(lastClosed.cmd || '') ? ['resume', '--last']
+      : [];
   wsSend({ type: 'new', cmd: lastClosed.cmd, cwd: lastClosed.cwd, args, profile: lastClosed.profile, cols: term.cols, rows: term.rows });
   lastClosed = null;
 }
@@ -136,6 +140,7 @@ let keepalive = null;
 function onReady(hostPresent) {
   ready = true;
   setConn(hostPresent);     // direct: connected · relay: only if the Mac bridge is live
+  wsSend({ type: 'client_hello' });
   wsSend({ type: 'sync' });  // pull the current session list
   clearInterval(keepalive);  // app-level heartbeat so the relay's idle reaper doesn't cull an idle overlay
   keepalive = setInterval(() => wsSend({ type: 'ping', t: Date.now() }), 25000);
@@ -168,12 +173,12 @@ function handle(msg) {
       renderRail();
       if (!focusedId) focus(m.id);
       if (was && was !== m.state && (m.state === 'idle' || m.state === 'exited')) flashEdge();
-      // "claude responded": a claude session finishes a turn (running -> idle).
+      // "agent responded": an agent session finishes a turn (running -> idle).
       // Skip its very first idle — that's the startup render, not a response.
-      if (was === 'running' && /claude/.test(m.cmd || '')) {
+      if (was === 'running') {
         if (m.state === 'exited') fire('Session ended', m);
         else if (m.state === 'idle') {
-          if (settled.has(m.id)) fire('Claude responded', m);
+          if (settled.has(m.id)) fire('Agent responded', m);
           else settled.add(m.id);
         }
       }
