@@ -65,3 +65,29 @@ All require `Authorization: Bearer <token>`.
 GABRIELE_TOKEN=dev-secret npm start &
 node test_handoff.mjs        # drives a full initialize → handoff → reply round-trip
 ```
+
+## ADB MCP
+
+There is also a local Android-control MCP server for emulator/device testing:
+
+```bash
+GABRIELE_TOKEN=<your-secret> npm run adb
+```
+
+It listens on `:8182` by default (`GABRIELE_ADB_MCP_PORT` overrides it) and
+uses the same Streamable HTTP MCP endpoint:
+
+```bash
+http://localhost:8182/mcp
+Authorization: Bearer <your-secret>
+```
+
+Tools include:
+
+- `devices` / `restart_server`
+- `tap`, `text`, `keyevent`
+- `screenshot`
+- `reverse`
+- `open_expo`, `reload_expo`
+- `logcat`
+- `shell`

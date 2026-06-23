@@ -1,14 +1,14 @@
 # Gabriele
 
 An **agent-first overlay terminal**. A translucent, always-on-top HUD that floats
-over your game and lets you supervise Claude Code agents in your peripheral
+over your game and lets you supervise Codex or bring-your-own agents in your peripheral
 vision — fire a prompt with a hotkey, keep playing, watch the tile pulse when the
 agent is done. Named after my brother, as we like to say: "Just tell Gabriele."
 
 ```
   ┌──────────── gaming PC ────────────┐        ┌──────────── Mac ────────────┐
   │  overlay  (Electron, top-most)    │  ws    │  bridge  (Node)             │
-  │   • tiles by state                │◀──────▶│   • spawns `claude` agents  │
+  │   • tiles by state                │◀──────▶│   • spawns `codex` agents   │
   │   • ⌥⇧Tab to prompt              │  LAN   │   • streams state back      │
   └───────────────────────────────────┘        └─────────────────────────────┘
 ```
@@ -25,6 +25,17 @@ npm run bridge          # terminal 1 — the agent host
 npm run overlay         # terminal 2 — the HUD
 npm run send "say hi"   # terminal 3 — fire a test prompt (or use ⌥⇧Tab)
 ```
+
+The default agent command is `codex`. Bring your own agent by changing the bridge
+command:
+
+```bash
+GABRIELE_CMD=opencode npm run bridge
+GABRIELE_CMD=claude GABRIELE_ARGS='["--dangerously-skip-permissions"]' npm run bridge
+```
+
+Any command that behaves like an interactive terminal agent can run here; the
+bridge is just a PTY host plus synchronized render stream.
 
 ## Run (real: overlay on the gaming PC)
 
