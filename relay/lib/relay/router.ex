@@ -13,6 +13,12 @@ defmodule Relay.Router do
     send_resp(conn, 200, "ok")
   end
 
+  get "/metrics" do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(Relay.Metrics.gather()))
+  end
+
   get "/ws" do
     conn
     |> WebSockAdapter.upgrade(Relay.Socket, %{}, timeout: 3_600_000)

@@ -73,6 +73,12 @@ defmodule Relay.Room do
     {:reply, {:ok, state.host != nil}, state}
   end
 
+  def handle_call(:stats, _from, state) do
+    bytes = state.buffers |> Map.values() |> Enum.reduce(0, &(byte_size(&1) + &2))
+    {:reply, %{host: state.host != nil, clients: map_size(state.clients),
+               sessions: map_size(state.sessions), buffer_kb: div(bytes, 1024)}, state}
+  end
+
   # ---- host frames: cache, THEN broadcast (append-before-fanout) ----
   @impl true
   def handle_cast({:host_frame, text}, state) do
