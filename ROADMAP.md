@@ -26,12 +26,12 @@ agent-native, floating over whatever you're doing.
 
 ---
 
-## Phase 1 — Trust it while you're away
+## Phase 1 — Trust it while you're away  ✅ SHIPPED
 *The unlock for daily use. The core promise is "let agents run while you do something else" — today that only works with `--dangerously-skip-permissions` (no oversight) or by watching. Make it safe to do neither.*
 
-1. **Remote approvals** — route permission prompts to the phone: approve/deny a tool call (or a batch) from the couch. This is *the* feature that makes agent-first-while-gaming actually safe. (Builds on the handoff MCP + `--permission-prompt-tool`.)
-2. **Relay auth hardening** — per-device tokens, read-only vs control roles, revocation. Today one shared secret = full RCE for anyone who has it; this is the biggest open risk.
-3. **Session resume across bridge restart** — `--continue` so a Mac reboot or bridge crash doesn't lose your agents.
+1. ✅ **Remote approvals** — a PreToolUse hook routes each tool to the phone (Allow/Deny); claude blocks until you decide, falls back to the normal prompt on timeout, never auto-allows. GUARD toggle on the phone creates approval-mode channels.
+2. ✅ **Relay auth hardening** — signed per-device tokens, **host / control / view** roles, revocation via `GABRIELE_REVOKED`. A leaked view token can watch but every control frame is dropped. Raw secret still works (legacy).
+3. ✅ **Session resume across bridge restart** — each claude channel gets a stable `--session-id`; the bridge persists the channel list and re-spawns with `--resume`, preserving profile + approval mode. A reboot no longer loses your agents.
 
 ## Phase 2 — The glance layer  ⭐ the bet
 *Why this beats "a terminal on your phone." The raw TUI is wrong for a phone (the redraw garble proved it) and wrong for glancing. The real wedge is a clean, agent-native view.*
