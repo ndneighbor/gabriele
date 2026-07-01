@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('gabriele', {
   notify: (payload) => ipcRenderer.send('notify', payload),
   onFocusSession: (cb) => ipcRenderer.on('focus-session', (_e, id) => cb(id)),
   setInteractive: (on) => ipcRenderer.send('interactive', on),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  onDevReloadCss: (cb) => ipcRenderer.on('dev-reload-css', () => cb()),
 });

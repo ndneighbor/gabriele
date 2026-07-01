@@ -6,6 +6,7 @@
 
 const pty = require('node-pty');
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
@@ -20,6 +21,8 @@ const DEFAULT_CWD = process.env.GABRIELE_CWD || process.cwd();
 const SKIP_PERMS = process.env.GABRIELE_SKIP_PERMS !== '0'; // Claude Code can run --dangerously-skip-permissions by default
 const RELAY_URL = process.env.GABRIELE_RELAY_URL || '';     // if set, dial out to the relay as host
 const TOKEN = process.env.GABRIELE_TOKEN || '';
+const HOOK_PORT = Number(process.env.GABRIELE_HOOK_PORT || (PORT + 1));
+const HOOK_TOKEN = process.env.GABRIELE_HOOK_TOKEN || crypto.randomBytes(18).toString('base64url');
 const BUFFER_CAP = 200 * 1024; // per-session scrollback kept for replay
 const IDLE_MS = 2000;          // no output this long => "idle" (turn done / awaiting you)
 // session resume: persist live channels so a bridge restart re-spawns them and
@@ -119,11 +122,51 @@ function broadcast(msg) {
   for (const c of wss.clients) if (c.readyState === 1) c.send(data);          // local LAN clients
   if (relay && relayAuthed && relay.readyState === 1) relay.send(data);        // remote clients via relay
 }
+
+function turnDonePayload(s, source, extra = {}) {
+  const title = extra.title || `${s.kind === 'codex' ? 'Codex' : s.kind || 'Agent'} completed`;
+  return {
+    type: 'turn_done',
+    id: s.id,
+    sessionId: s.sessionId || null,
+    agent: extra.agent || s.kind || 'agent',
+    title,
+    body: extra.body || extra.text || s.title,
+    cwd: extra.cwd || s.cwd,
+    source,
+    at: Date.now(),
+  };
+}
+
+function publishTurnDone(s, source, extra) {
+  const now = Date.now();
+  if (now - (s.lastTurnDoneAt || 0) < 3000) return;
+  s.lastTurnDoneAt = now;
+  s.pendingTurn = false;
+  broadcast(turnDonePayload(s, source, extra));
+}
+
+function findSessionForHook(payload) {
+  if (payload.id && sessions.has(String(payload.id))) return sessions.get(String(payload.id));
+  if (payload.sessionId) {
+    for (const s of sessions.values()) if (s.sessionId === payload.sessionId) return s;
+  }
+  if (payload.cwd) {
+    const candidates = [...sessions.values()]
+      .filter((s) => s.cwd === payload.cwd && (!payload.agent || s.kind === payload.agent))
+      .sort((a, b) => b.startedAt - a.startedAt);
+    if (candidates[0]) return candidates[0];
+  }
+  return null;
+}
+
 function setState(s, state) {
   if (!sessions.has(s.id)) return; // closed/removed — don't resurrect it
   if (s.state === state) return;
+  const was = s.state;
   s.state = state;
   broadcast({ type: 'session', meta: meta(s) });
+  if (was === 'running' && state === 'idle' && s.pendingTurn) publishTurnDone(s, 'idle');
 }
 
 // One coherent current frame for focus/replay: exit alt-screen + clear + home +
@@ -170,6 +213,7 @@ function stripIdFlags(arr) {
 function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, resumeId, clientId, clientKind } = {}) {
   cmd = cmd || DEFAULT_CMD;
   cwd = cwd || DEFAULT_CWD;
+  const id = String(nextId++);
   const extraArgs = stripIdFlags(args || [...DEFAULT_ARGS]); // user/agent args ONLY — the id flag is re-derived each spawn, never persisted (else it accumulates on every restore)
   args = extraArgs;
   const kind = agentKind(cmd);
@@ -206,6 +250,10 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, 
   else delete env.CLAUDE_CONFIG_DIR; // "default" profile = the standard ~/.claude, regardless of how the bridge was launched
   if (approvals) env.GABRIELE_APPROVALS = '1'; // PreToolUse hook routes this channel's tool calls to the phone
   else delete env.GABRIELE_APPROVALS;
+  env.GABRIELE_NOTIFY_URL = `http://127.0.0.1:${HOOK_PORT}/turn_done`;
+  env.GABRIELE_NOTIFY_TOKEN = HOOK_TOKEN;
+  env.GABRIELE_SESSION_ID = id;
+  env.GABRIELE_AGENT_KIND = kind;
 
   const startCols = cols || 80, startRows = rows || 24;
   const term = pty.spawn(cmd, args, {
@@ -222,7 +270,7 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, 
   emu.loadAddon(ser);
 
   const s = {
-    id: String(nextId++),
+    id,
     title: title || `${cmd.split('/').pop()} · ${cwd.split('/').pop()}`,
     cwd, cmd, args, extraArgs,
     kind,
@@ -238,6 +286,8 @@ function createSession({ cmd, args, cwd, title, cols, rows, profile, approvals, 
     sizeOwner: { id: clientId || null, kind: clientKind || 'initial', at: Date.now() },
     resnapTimer: null,
     idleTimer: null,
+    pendingTurn: false,
+    lastTurnDoneAt: 0,
   };
   sessions.set(s.id, s);
 
@@ -278,6 +328,38 @@ function persistSessions() {
   } catch {}
 }
 
+function startHookServer() {
+  const server = http.createServer((req, res) => {
+    const done = (code, text) => {
+      res.writeHead(code, { 'content-type': 'text/plain' });
+      res.end(text || '');
+    };
+
+    if (req.method !== 'POST' || req.url !== '/turn_done') return done(404, 'not found');
+    if (req.headers.authorization !== `Bearer ${HOOK_TOKEN}`) return done(401, 'unauthorized');
+
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 64 * 1024) req.destroy();
+    });
+    req.on('end', () => {
+      let payload;
+      try { payload = JSON.parse(body || '{}'); } catch { return done(400, 'bad json'); }
+      const s = findSessionForHook(payload);
+      if (!s) return done(404, 'session not found');
+      publishTurnDone(s, payload.source || 'hook', payload);
+      done(204);
+    });
+  });
+
+  server.listen(HOOK_PORT, '127.0.0.1', () => {
+    console.log(`[gabriele] hook notify listening on http://127.0.0.1:${HOOK_PORT}/turn_done`);
+  });
+  server.on('error', (err) => console.log(`[gabriele] hook notify unavailable: ${err.message}`));
+}
+
 function restoreSessions() {
   if (!RESUME) return;
   let list;
@@ -305,11 +387,11 @@ function handleMessage(m) {
       createSession(m);
       break;
     case 'input':
-      if (s && s.state !== 'exited') s.pty.write(m.data);
+      if (s && s.state !== 'exited') { s.pendingTurn = true; s.pty.write(m.data); }
       break;
     case 'prompt': {                     // no target id (e.g. bridge/send.js) — fire at the newest live session
       const target = [...sessions.values()].filter((x) => x.state !== 'exited').sort((a, b) => b.startedAt - a.startedAt)[0];
-      if (target && typeof m.text === 'string') target.pty.write(m.text + '\r');
+      if (target && typeof m.text === 'string') { target.pendingTurn = true; target.pty.write(m.text + '\r'); }
       break;
     }
     case 'resize':
@@ -366,4 +448,5 @@ function connectRelay() {
 }
 
 restoreSessions(); // bring back channels (+ resume their claude conversations) from a previous run
+startHookServer();
 connectRelay();

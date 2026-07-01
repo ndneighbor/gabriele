@@ -45,6 +45,40 @@ Together: you see what agents are doing, and they pull you in when they need you
 
 ---
 
+# Codex overlay completion — `codex-stop-notify.mjs`
+
+`codex-stop-notify.mjs` is a Codex **Stop hook**. When Codex finishes a turn,
+it tells the local Gabriele bridge, which then broadcasts `turn_done` to the
+overlay. The hook is a silent no-op unless the bridge spawned that Codex session
+and injected `GABRIELE_NOTIFY_URL`, `GABRIELE_NOTIFY_TOKEN`, and
+`GABRIELE_SESSION_ID`.
+
+Add this to `~/.codex/hooks.json` or a project `.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/vecino/Development/Development/gabriele/mcp/hooks/codex-stop-notify.mjs",
+            "timeout": 5,
+            "statusMessage": "Notifying Gabriele"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Then run `/hooks` in Codex and trust the hook. Codex skips non-managed command
+hooks until their exact definition is reviewed and trusted.
+
+---
+
 # Remote approvals — `approve.mjs` (PreToolUse hook)
 
 When a channel runs in **approval mode** (the bridge sets `GABRIELE_APPROVALS=1`,

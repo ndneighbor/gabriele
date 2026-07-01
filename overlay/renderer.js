@@ -1,4 +1,4 @@
-const { wsUrl, token, onFocus, clipboard, notify, onFocusSession } = window.gabriele;
+const { wsUrl, token, onFocus, clipboard, notify, onFocusSession, openExternal } = window.gabriele;
 const RELAY = !!token; // token set => connect via the relay: send hello, wait for hello_ok
 
 const railEl = document.getElementById('rail');
@@ -7,7 +7,6 @@ const connEl = document.getElementById('conn');
 const edgeEl = document.getElementById('edge');
 
 const sessions = new Map(); // id -> meta
-const settled = new Set();   // session ids that idled once already (skip startup render)
 const lastNotify = new Map(); // id -> last notify time (de-dupe mid-turn idle flaps)
 let focusedId = null;
 let ws;
@@ -30,6 +29,12 @@ const term = new Terminal({
   cursorStyle: 'bar',
   scrollback: 8000,
   allowTransparency: true,
+  linkHandler: {
+    activate: (_event, text) => openTerminalLink(text),
+    hover: (event, text) => showLinkHover(event, text),
+    leave: hideLinkHover,
+    allowNonHttpProtocols: false,
+  },
   theme: {
     background: 'rgba(0,0,0,0)',
     foreground: '#d6d6da',
@@ -84,6 +89,142 @@ function sendResize() {
   if (focusedId) wsSend({ type: 'resize', id: focusedId, cols: term.cols, rows: term.rows });
 }
 window.addEventListener('resize', sendResize);
+
+const WEB_URL_RE = /\bhttps?:\/\/[^\s<>"'`]+/gi;
+let linkHoverEl = null;
+function openTerminalLink(text) {
+  const url = cleanUrl(text);
+  if (!url) return;
+  openExternal(url);
+}
+
+function cleanUrl(text) {
+  let url = String(text || '').trim();
+  if (!url) return null;
+
+  while (/[.,;:!?}\]]$/.test(url)) url = url.slice(0, -1);
+  while (url.endsWith(')') && countChar(url, '(') < countChar(url, ')')) url = url.slice(0, -1);
+
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function countChar(text, char) {
+  let count = 0;
+  for (const c of text) if (c === char) count++;
+  return count;
+}
+
+function showLinkHover(event, text) {
+  const url = cleanUrl(text);
+  if (!url) return;
+
+  const tip = ensureLinkHover();
+  tip.textContent = url;
+  tip.classList.add('show');
+
+  const pad = 10;
+  const x = Math.min(event.clientX + 12, window.innerWidth - tip.offsetWidth - pad);
+  const y = Math.max(pad, event.clientY - tip.offsetHeight - 12);
+  tip.style.left = `${Math.max(pad, x)}px`;
+  tip.style.top = `${y}px`;
+}
+
+function hideLinkHover() {
+  if (!linkHoverEl) return;
+  linkHoverEl.classList.remove('show');
+  linkHoverEl.removeAttribute('style');
+}
+
+function ensureLinkHover() {
+  if (linkHoverEl) return linkHoverEl;
+  linkHoverEl = document.createElement('div');
+  linkHoverEl.id = 'link-tip';
+  linkHoverEl.className = 'xterm-hover';
+  document.body.appendChild(linkHoverEl);
+  return linkHoverEl;
+}
+
+function registerWebLinkProvider() {
+  if (typeof term.registerLinkProvider !== 'function') return;
+
+  term.registerLinkProvider({
+    provideLinks(bufferLineNumber, callback) {
+      const wrapped = getWrappedText(bufferLineNumber);
+      if (!wrapped) {
+        callback(undefined);
+        return;
+      }
+
+      const links = [];
+      WEB_URL_RE.lastIndex = 0;
+
+      for (let match = WEB_URL_RE.exec(wrapped.text); match; match = WEB_URL_RE.exec(wrapped.text)) {
+        const url = cleanUrl(match[0]);
+        if (!url) continue;
+
+        const start = wrapped.cells[match.index];
+        const end = wrapped.cells[match.index + url.length - 1];
+        if (!start || !end) continue;
+
+        links.push({
+          text: url,
+          range: {
+            start,
+            end,
+          },
+          decorations: { underline: true, pointerCursor: true },
+          activate: (_event, text) => openTerminalLink(text),
+          hover: (event, text) => showLinkHover(event, text),
+          leave: hideLinkHover,
+        });
+      }
+
+      callback(links.length ? links : undefined);
+    },
+  });
+}
+registerWebLinkProvider();
+
+function getWrappedText(bufferLineNumber) {
+  const buffer = term.buffer.active;
+  let startY = bufferLineNumber - 1;
+  let endY = startY;
+
+  if (!buffer.getLine(startY)) return null;
+
+  while (startY > 0 && buffer.getLine(startY)?.isWrapped) startY--;
+  while (endY + 1 < buffer.length && buffer.getLine(endY + 1)?.isWrapped) endY++;
+
+  let text = '';
+  const cells = [];
+  for (let y = startY; y <= endY; y++) {
+    const line = buffer.getLine(y);
+    if (!line) continue;
+    const lineText = line.translateToString(y === endY);
+    for (let x = 0; x < lineText.length; x++) {
+      cells.push({ x: x + 1, y: y + 1 });
+    }
+    text += lineText;
+  }
+
+  return text ? { text, cells } : null;
+}
+
+if (window.gabriele.onDevReloadCss) {
+  window.gabriele.onDevReloadCss(() => {
+    const stamp = Date.now().toString();
+    document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+      const href = link.getAttribute('href') || '';
+      if (!href.includes('styles.css')) return;
+      link.setAttribute('href', `${href.split('?')[0]}?dev=${stamp}`);
+    });
+  });
+}
 
 function newSession(profile) {
   wsSend({ type: 'new', cols: term.cols, rows: term.rows, profile: profile || defaultProfile });
@@ -178,15 +319,19 @@ function handle(msg) {
       renderRail();
       if (!focusedId) focus(m.id);
       if (was && was !== m.state && (m.state === 'idle' || m.state === 'exited')) flashEdge();
-      // "agent responded": an agent session finishes a turn (running -> idle).
-      // Skip its very first idle — that's the startup render, not a response.
+      // Agent session finishes a turn (running -> idle). Cooldown handles idle flaps.
       if (was === 'running') {
         if (m.state === 'exited') fire('Session ended', m);
-        else if (m.state === 'idle') {
-          if (settled.has(m.id)) fire('Agent responded', m);
-          else settled.add(m.id);
-        }
+        else if (m.state === 'idle') fire(agentDoneTitle(m), m);
       }
+      break;
+    }
+    case 'turn_done': {
+      const s = msg.id && sessions.get(msg.id);
+      fire(msg.title || agentDoneTitle(s || msg), {
+        id: msg.id,
+        body: msg.body || s?.title || msg.cwd || '',
+      });
       break;
     }
     case 'data':
@@ -199,12 +344,12 @@ function handle(msg) {
         const off = scrollPos.get(msg.id) || 0;
         term.write(msg.data, () => {           // restore scroll once the replay is rendered
           if (off > 0) { try { term.scrollToLine(Math.max(0, term.buffer.active.baseY - off)); } catch {} }
+          else scrollActiveToBottom();
         });
       }
       break;
     case 'closed':
       sessions.delete(msg.id);
-      settled.delete(msg.id);
       lastNotify.delete(msg.id);
       scrollPos.delete(msg.id);
       if (focusedId === msg.id) {
@@ -228,6 +373,18 @@ function focus(id) {
 }
 function scrollOffset() {
   try { const b = term.buffer.active; return Math.max(0, b.baseY - b.viewportY); } catch { return 0; }
+}
+
+function scrollActiveToBottom() {
+  if (focusedId) scrollPos.delete(focusedId);
+  try { term.scrollToBottom(); return; } catch {}
+  try { term.scrollToLine(term.buffer.active.baseY); } catch {}
+}
+
+function scrollActiveToBottomSoon() {
+  scrollActiveToBottom();
+  requestAnimationFrame(() => scrollActiveToBottom());
+  setTimeout(() => scrollActiveToBottom(), 60);
 }
 
 function setConn(on) {
@@ -294,22 +451,89 @@ function renderStatus() {
   statusEl.innerHTML = parts.join('&nbsp;·&nbsp;') || (sessions.size ? `${sessions.size} CH` : 'NO CHANNELS');
 }
 
-const NOTIFY_COOLDOWN_MS = 10000;
-function fire(title, m) {
+const NOTIFY_COOLDOWN_MS = 2500;
+const TOAST_MS = 2000;
+let toastStackEl = null;
+let audioCtx = null;
+
+function agentDoneTitle(m) {
+  return `${m?.kind === 'codex' ? 'Codex' : m?.kind || 'Agent'} completed`;
+}
+
+function fire(title, m = {}) {
   const now = Date.now();
-  if (now - (lastNotify.get(m.id) || 0) < NOTIFY_COOLDOWN_MS) return; // collapse mid-turn idle flaps
-  lastNotify.set(m.id, now);
-  notify({ title, body: m.title, id: m.id });
+  const body = m.body || m.title || '';
+  const key = m.id || `${title}:${body}`;
+  if (now - (lastNotify.get(key) || 0) < NOTIFY_COOLDOWN_MS) return; // collapse mid-turn idle flaps
+  lastNotify.set(key, now);
+  const payload = { title, body, id: m.id };
+  flashEdge();
+  showCompletionToast(payload);
+  playNotifySound();
+  notify(payload);
+}
+
+function ensureToastStack() {
+  if (toastStackEl) return toastStackEl;
+  toastStackEl = document.createElement('div');
+  toastStackEl.id = 'toast-stack';
+  document.body.appendChild(toastStackEl);
+  return toastStackEl;
+}
+
+function showCompletionToast({ title, body, id }) {
+  const stack = ensureToastStack();
+  const toast = document.createElement('button');
+  toast.type = 'button';
+  toast.className = 'toast';
+  toast.innerHTML = `<span class="tt">${esc(title)}</span>${body ? `<span class="tb">${esc(body)}</span>` : ''}`;
+  toast.onclick = () => { if (id && sessions.has(id)) focus(id); };
+  toast.addEventListener('mouseenter', () => window.gabriele.setInteractive(true));
+  toast.addEventListener('mouseleave', () => window.gabriele.setInteractive(false));
+  stack.prepend(toast);
+  setTimeout(() => {
+    toast.classList.add('out');
+    setTimeout(() => toast.remove(), 180);
+  }, TOAST_MS);
+}
+
+function playNotifySound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    audioCtx ||= new AudioContext();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    const now = audioCtx.currentTime + 0.01;
+    [740, 980].forEach((freq, i) => {
+      const start = now + i * 0.08;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.045, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.13);
+    });
+  } catch {}
 }
 
 // ---- focus mode (global hotkey via main) ----
 onFocus((on) => {
   document.body.classList.toggle('focused', on);
-  if (on) { term.focus(); sendResize(); } else { term.blur(); }
+  if (on) { term.focus(); sendResize(); scrollActiveToBottomSoon(); } else { term.blur(); }
 });
 
 // notification click → main summons us, we jump to that session
-onFocusSession((id) => { if (sessions.has(id)) focus(id); });
+onFocusSession((id) => {
+  if (!sessions.has(id)) return;
+  scrollPos.delete(id);
+  focus(id);
+  scrollActiveToBottomSoon();
+});
 
 // In glance the window is click-through; make the chrome (rail + header)
 // clickable while hovered so you can close/switch panes without summoning.
