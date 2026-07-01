@@ -6,6 +6,7 @@
   "scripts": {
     "bridge": "node bridge/server.js",
     "overlay": "electron .",
+    "send": "node bridge/send.js",
     "postinstall": "node scripts/fix-pty.js"
   },
   "dependencies": {

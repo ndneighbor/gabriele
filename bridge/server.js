@@ -307,6 +307,11 @@ function handleMessage(m) {
     case 'input':
       if (s && s.state !== 'exited') s.pty.write(m.data);
       break;
+    case 'prompt': {                     // no target id (e.g. bridge/send.js) — fire at the newest live session
+      const target = [...sessions.values()].filter((x) => x.state !== 'exited').sort((a, b) => b.startedAt - a.startedAt)[0];
+      if (target && typeof m.text === 'string') target.pty.write(m.text + '\r');
+      break;
+    }
     case 'resize':
       if (s && s.state !== 'exited') applyResize(s, m);
       break;

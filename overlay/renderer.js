@@ -17,6 +17,7 @@ const scrollPos = new Map(); // id -> scroll offset from bottom (spatial continu
 let lastClosed = null;       // {cmd, cwd, profile} of the most recently closed channel (⌘⇧T reopen)
 let profiles = [];           // [{id,label}] logins advertised by the relay/bridge
 let defaultProfile = null;
+let wasDown = false;         // set on a real socket drop, so we repaint only on genuine reconnect (not every sessions frame)
 const clientId = `desktop-${crypto.randomUUID()}`;
 const clientKind = 'desktop';
 
@@ -131,7 +132,7 @@ function connect() {
     if (RELAY) ws.send(JSON.stringify({ type: 'hello', role: 'client', token })); // auth, then wait for hello_ok
     else onReady(true);                                                            // direct LAN bridge: live now
   };
-  ws.onclose = () => { ready = false; clearInterval(keepalive); setConn(false); setTimeout(connect, 1200); };
+  ws.onclose = () => { ready = false; wasDown = true; clearInterval(keepalive); setConn(false); setTimeout(connect, 1200); };
   ws.onerror = () => ws.close();
   ws.onmessage = (e) => handle(JSON.parse(e.data));
 }
@@ -163,8 +164,12 @@ function handle(msg) {
       sessions.clear();
       for (const m of msg.sessions) sessions.set(m.id, m);
       renderRail();
-      if (focusedId && sessions.has(focusedId)) focus(focusedId);               // reconnect: re-pull a fresh snapshot (else stale pre-drop screen)
+      // Repaint ONLY after a genuine reconnect (wasDown), not on every sessions frame —
+      // otherwise a flapping link (or just a routine backend resync) triggers a reset
+      // storm mid-stream on the already-focused, already-correctly-rendering channel.
+      if (focusedId && sessions.has(focusedId)) { if (wasDown) focus(focusedId); }
       else if (sessions.size) focus([...sessions.keys()][0]);                   // first connect — no auto-NEW (that caused phantom storms)
+      wasDown = false;
       break;
     case 'session': {
       const prev = sessions.get(msg.meta.id);
@@ -189,7 +194,8 @@ function handle(msg) {
       break;
     case 'snapshot':
       if (msg.id === focusedId) {
-        term.reset();
+        // write, not reset: the frame self-clears (ESC[2J/3J/H, bridge/server.js broadcastSnapshot).
+        // A reset() here would wipe any 'data' that streamed in during the focus round-trip.
         const off = scrollPos.get(msg.id) || 0;
         term.write(msg.data, () => {           // restore scroll once the replay is rendered
           if (off > 0) { try { term.scrollToLine(Math.max(0, term.buffer.active.baseY - off)); } catch {} }
