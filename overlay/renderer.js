@@ -19,6 +19,7 @@ let defaultProfile = null;
 let wasDown = false;         // set on a real socket drop, so we repaint only on genuine reconnect (not every sessions frame)
 const clientId = `desktop-${crypto.randomUUID()}`;
 const clientKind = 'desktop';
+let scrollBottomSnapshotId = null;
 
 // ---- terminal ----
 const term = new Terminal({
@@ -57,6 +58,7 @@ new ResizeObserver(() => sendResize()).observe(document.getElementById('term'));
 term.onData((d) => {
   if (focusedId) wsSend({ type: 'input', id: focusedId, data: d });
 });
+term.onScroll(() => captureActiveScroll());
 
 // clipboard: copy-on-select (iTerm-style) + ⌘C / ⌘V
 term.onSelectionChange(() => {
@@ -344,7 +346,10 @@ function handle(msg) {
         const off = scrollPos.get(msg.id) || 0;
         term.write(msg.data, () => {           // restore scroll once the replay is rendered
           if (off > 0) { try { term.scrollToLine(Math.max(0, term.buffer.active.baseY - off)); } catch {} }
-          else scrollActiveToBottom();
+          else if (scrollBottomSnapshotId === msg.id) {
+            scrollBottomSnapshotId = null;
+            scrollActiveToBottom();
+          }
         });
       }
       break;
@@ -363,8 +368,14 @@ function handle(msg) {
   }
 }
 
-function focus(id) {
-  if (focusedId && focusedId !== id) scrollPos.set(focusedId, scrollOffset()); // remember where we were
+function focus(id, opts = {}) {
+  if (focusedId && focusedId !== id) captureActiveScroll(); // remember where we were
+  if (opts.bottom) {
+    scrollPos.delete(id);
+    scrollBottomSnapshotId = id;
+  } else if (scrollBottomSnapshotId === id) {
+    scrollBottomSnapshotId = null;
+  }
   focusedId = id;
   term.reset();
   wsSend({ type: 'focus', id }); // replay scrollback
@@ -373,6 +384,13 @@ function focus(id) {
 }
 function scrollOffset() {
   try { const b = term.buffer.active; return Math.max(0, b.baseY - b.viewportY); } catch { return 0; }
+}
+
+function captureActiveScroll() {
+  if (!focusedId) return;
+  const off = scrollOffset();
+  if (off > 0) scrollPos.set(focusedId, off);
+  else scrollPos.delete(focusedId);
 }
 
 function scrollActiveToBottom() {
@@ -530,8 +548,7 @@ onFocus((on) => {
 // notification click → main summons us, we jump to that session
 onFocusSession((id) => {
   if (!sessions.has(id)) return;
-  scrollPos.delete(id);
-  focus(id);
+  focus(id, { bottom: true });
   scrollActiveToBottomSoon();
 });
 
