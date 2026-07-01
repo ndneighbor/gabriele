@@ -60,6 +60,10 @@ The hook script lives in the repo, but the Codex hook registration is user or
 project config outside the repo, usually `~/.codex/hooks.json`. After adding or
 changing that config, run `/hooks` inside Codex and trust the hook.
 
+If Gabriele is hidden when a completion arrives, it briefly peeks in
+click-through glance mode so the toast is visible over the game, then hides
+again.
+
 ## Develop the overlay
 
 ```bash
@@ -89,6 +93,10 @@ GABRIELE_DISPLAY=1 npm run overlay
 again while focused to hide Gabriele. `Option+Shift+G` / `Alt+Shift+G` toggles a
 click-through glance. Override with `GABRIELE_HOTKEY` and
 `GABRIELE_GLANCE_HOTKEY`.
+
+On macOS, hiding the focused overlay restores the app that was active before
+Gabriele took keyboard focus, so a game should regain input without another
+click.
 
 Note: on **Windows**, `Alt+Shift+Tab` is the OS reverse-window-switcher — pick a
 different combo there via `GABRIELE_HOTKEY` (e.g. `Alt+Shift+G`).
