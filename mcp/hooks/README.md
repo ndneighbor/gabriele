@@ -53,6 +53,15 @@ overlay. The hook is a silent no-op unless the bridge spawned that Codex session
 and injected `GABRIELE_NOTIFY_URL`, `GABRIELE_NOTIFY_TOKEN`, and
 `GABRIELE_SESSION_ID`.
 
+The bridge side is repo code in `bridge/server.js`. It starts a localhost hook
+endpoint at `http://127.0.0.1:$GABRIELE_HOOK_PORT/turn_done` (`GABRIELE_PORT + 1`
+by default) and authenticates hook posts with `GABRIELE_NOTIFY_TOKEN`.
+
+This hook is a belt-and-suspenders completion signal. The overlay also listens
+for the bridge's normal `running -> idle` state transition, so bridge-spawned
+sessions can still show completion toasts even before the Codex hook path is
+installed or trusted.
+
 Add this to `~/.codex/hooks.json` or a project `.codex/hooks.json`:
 
 ```json
@@ -76,6 +85,9 @@ Add this to `~/.codex/hooks.json` or a project `.codex/hooks.json`:
 
 Then run `/hooks` in Codex and trust the hook. Codex skips non-managed command
 hooks until their exact definition is reviewed and trusted.
+
+Important boundary: `codex-stop-notify.mjs` is tracked in this repo;
+`~/.codex/hooks.json` is machine-local user config and is not committed here.
 
 ---
 

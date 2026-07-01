@@ -39,6 +39,27 @@ GABRIELE_CMD=claude GABRIELE_ARGS='["--dangerously-skip-permissions"]' npm run b
 Any command that behaves like an interactive terminal agent can run here; the
 bridge is just a PTY host plus synchronized render stream.
 
+## Bridge and completion hooks
+
+The bridge is part of this repo: [bridge/server.js](bridge/server.js). It owns
+the long-lived PTYs, streams terminal output to the overlay, tracks
+running/idle/exited state, and broadcasts completion events.
+
+Completion notifications have two layers:
+
+- **PTY idle detection**: when the bridge sees a prompted session go
+  `running -> idle`, the overlay shows the 2-second toast. This works for
+  bridge-spawned agents without installing any Codex hook.
+- **Codex Stop hook**: [mcp/hooks/codex-stop-notify.mjs](mcp/hooks/codex-stop-notify.mjs)
+  posts to the bridge's local `/turn_done` endpoint when Codex finishes a turn.
+  The bridge injects `GABRIELE_NOTIFY_URL`, `GABRIELE_NOTIFY_TOKEN`, and
+  `GABRIELE_SESSION_ID` into sessions it spawns, so the hook is a no-op outside
+  Gabriele.
+
+The hook script lives in the repo, but the Codex hook registration is user or
+project config outside the repo, usually `~/.codex/hooks.json`. After adding or
+changing that config, run `/hooks` inside Codex and trust the hook.
+
 ## Develop the overlay
 
 ```bash
